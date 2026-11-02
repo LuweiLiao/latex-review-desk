@@ -1,6 +1,8 @@
 // 右侧批注列表：待确认的方案直接在卡片里显示修订对照，可就地接受、驳回、重做
-import { api, $, h, guard, toast, timeAgo, STATUS, OPEN } from './util.js';
-import { state, emit } from './state.js';
+import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN } from './util.js';
+import { state, emit, on } from './state.js';
+import { diffWords } from '../lib/diff.js';
+import { itemAnchor, pageOffset, pdfReady } from './pdfview.js';
 import { cachedHunks, compareDiff, countChunks, hunksOf, inlineDiff, replacementsWithout } from './inline.js';
 import { skillSelect } from './menu.js';
 import { byPosition } from './review.js';
@@ -8,12 +10,16 @@ import { byPosition } from './review.js';
 const openBoxes = new Map(); // 正在填写的回复框：id -> 文本，重绘时保留
 
 export function initSidebar() {
-  $('#statusFilter').value = localStorage.getItem('statusFilter') || 'open';
+  // “全部”已去掉，旧的记录按“未完成”处理
+  const sf = localStorage.getItem('statusFilter');
+  $('#statusFilter').value = sf && sf !== 'all' ? sf : 'open';
+  if (!$('#statusFilter').value) $('#statusFilter').value = 'open';
   $('#sortOrder').value = localStorage.getItem('sortOrder') || 'pos';
   $('#statusFilter').onchange = (e) => { localStorage.setItem('statusFilter', e.target.value); renderSidebar(); };
   $('#sortOrder').onchange = (e) => { localStorage.setItem('sortOrder', e.target.value); renderSidebar(); };
   $('#chapterFilter').onchange = (e) => { localStorage.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
   initResize();
+  initRail();
 }
 
 function initResize() {
@@ -63,7 +69,8 @@ function fillChapterFilter() {
 function visible() {
   const f = $('#statusFilter').value;
   const scope = scopeFile();
-  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter((it) => f === 'all' || (f === 'open' ? OPEN.has(it.status) : it.status === f || (f === 'pending' && it.status === 'claimed')));
+  const unfinished = (it) => ['pending', 'claimed', 'proposed'].includes(it.status) || (it.status === 'replied' && !it.job);
+  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter((it) => (f === 'open' ? unfinished(it) : it.status === f || (f === 'pending' && it.status === 'claimed')));
   if ($('#sortOrder').value === 'time') list = list.sort((a, b) => b.updatedAt - a.updatedAt);
   else list = list.sort(byPosition);
   return list;
@@ -77,11 +84,14 @@ export function renderSidebar() {
   const n = state.items.filter((it) => it.status === 'proposed' && (!scope || it.anchor.file === scope)).length;
   const total = state.items.filter((it) => it.status === 'proposed').length;
   $('#sideTitle').textContent = n ? `注释 · ${n} 条待确认${scope && total > n ? `（全部 ${total}）` : ''}` : total ? `注释 · 其他章 ${total} 条待确认` : '注释';
+  if (!railMode()) { box.classList.remove('rail-mode'); ro?.disconnect(); railNodes = []; }
   if (!list.length) {
+    box.classList.remove('rail-mode');
     const others = scope && state.items.some((it) => it.anchor.file !== scope && OPEN.has(it.status));
     box.replaceChildren(h('div', { class: 'empty' }, !state.items.length ? '在 PDF 或源码里选中文字，\n点“批注”或选一个 skill 润色。' : others ? `${chapterName(scope)}没有符合筛选的注释。\n其他章节的可以在上方切到“全部章节”。` : '这个筛选下没有条目'));
     return;
   }
+  if (railMode()) { renderRail(list, box); return; }
   const top = box.scrollTop;
   const nodes = [];
   let last = null;
@@ -97,7 +107,7 @@ export function renderSidebar() {
   box.scrollTop = top;
 }
 
-function card(it) {
+function card(it, inRail = false) {
   const head = h('div', { class: 'card-head' },
     h('span', { class: `tag ${it.status}` }, STATUS[it.status]),
     it.stale && h('span', { class: 'tag stale' }, '原文已改'),
@@ -108,12 +118,13 @@ function card(it) {
     duplicatesOf(it).length > 0 && h('span', { class: 'tag stale', title: '同一段落还有其他未完成的请求，保留一条即可' }, `与 ${duplicatesOf(it).join('、')} 重复`),
     h('span', {}, [it.anchor.page ? `第 ${it.anchor.page} 页` : '', it.anchor.section].filter(Boolean).join(' · ')),
   );
+  if (inRail) head.append(h('span', { class: 'spacer' }), h('button', { class: 'btn link', title: '收起（Esc）', onclick: () => emit('clear-active') }, '收起'));
   const hasProposal0 = (it.status === 'proposed' || it.status === 'accepted') && it.proposal;
-  if (hasProposal0) head.append(h('span', { class: 'spacer' }), h('button', {
+  if (hasProposal0) head.append(...[!inRail && h('span', { class: 'spacer' }), h('button', {
     class: 'btn link mode-toggle',
     title: '切换左右对照 / 单栏修订',
     onclick: () => { localStorage.setItem('sideDiffMode', diffMode() === 'inline' ? 'compare' : 'inline'); renderSidebar(); },
-  }, diffMode() === 'inline' ? '对照' : '修订'));
+  }, diffMode() === 'inline' ? '对照' : '修订')].filter(Boolean));
   const hasProposal = (it.status === 'proposed' || it.status === 'accepted') && it.proposal;
   // 只显示最近一轮（上次发回重做之后）的对话，旧的“无需修改”之类不再挂着
   // 已有方案时，方案之前 agent 说的话（如旧的“无需修改”）也不再显示
@@ -272,5 +283,146 @@ function replyBox(it, text = '') {
 }
 
 export function scrollCardIntoView(id) {
+  if ($('#itemList').classList.contains('rail-mode')) return; // 贴边模式下卡片跟着 PDF 走
   document.querySelector(`.card[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+// ---- 贴边卡片 ----
+// 按位置排序、在阅读页、PDF 已加载时：每条注释是一张小卡片，贴在 PDF 上对应文字的高度，跟着 PDF 滚动。
+// 点哪张就在原位展开成完整卡片（修改前 / 修改后对照），其余卡片上下让开。
+export const railMode = () => $('#sortOrder').value === 'pos' && state.mode === 'read' && pdfReady();
+
+const anchors = new Map(); // 位置缓存：key -> { page, fy } | null
+let railNodes = [];
+let ro = null;
+let layoutQueued = false;
+
+function anchorOf(it) {
+  const k = `${it.id}:${it.anchor.lineStart}:${it.anchor.quote.length}:${state.pdf?.mtime}`;
+  if (!anchors.has(k)) {
+    // 先按记下的页码放在页中间，找到准确位置后再挪过去
+    anchors.set(k, it.anchor.page ? { page: it.anchor.page, fy: 0.5 } : null);
+    itemAnchor(it).then((a) => { if (a) { anchors.set(k, a); scheduleLayout(); } }).catch(() => {});
+  }
+  return anchors.get(k);
+}
+
+function renderRail(list, box) {
+  box.classList.add('rail-mode');
+  ro?.disconnect();
+  ro = new ResizeObserver(() => scheduleLayout());
+  const rail = h('div', { class: 'rail' });
+  railNodes = list.map((it) => {
+    const el = it.id === state.activeId ? card(it, true) : miniCard(it);
+    el.classList.add('rail-card');
+    rail.append(el);
+    ro.observe(el);
+    return { it, el };
+  });
+  box.replaceChildren(rail);
+  box.scrollTop = 0;
+  layoutRail(true);
+}
+
+function scheduleLayout() {
+  if (layoutQueued) return;
+  layoutQueued = true;
+  requestAnimationFrame(() => { layoutQueued = false; layoutRail(); });
+}
+
+// 卡片按对应文字的高度排；挤在一起时往下让，展开的那张固定在原位，前面的往上让
+function layoutRail(first = false) {
+  if (!$('#itemList').classList.contains('rail-mode')) return;
+  const GAP = 6;
+  const rows = [];
+  railNodes.forEach(({ it, el }, i) => {
+    const a = anchorOf(it);
+    const y = a && pageOffset(a.page, a.fy);
+    if (y == null) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    rows.push({ el, y, h: el.offsetHeight, i, active: it.id === state.activeId });
+  });
+  rows.sort((a, b) => a.y - b.y || a.i - b.i);
+  const k = rows.findIndex((r) => r.active);
+  if (k === -1) {
+    let bottom = -Infinity;
+    for (const r of rows) { r.top = Math.max(r.y, bottom + GAP); bottom = r.top + r.h; }
+  } else {
+    rows[k].top = rows[k].y;
+    for (let j = k + 1; j < rows.length; j++) rows[j].top = Math.max(rows[j].y, rows[j - 1].top + rows[j - 1].h + GAP);
+    for (let j = k - 1; j >= 0; j--) rows[j].top = Math.min(rows[j].y, rows[j + 1].top - rows[j].h - GAP);
+  }
+  for (const r of rows) {
+    r.el.style.transition = first ? 'none' : '';
+    r.el.style.top = `${r.top}px`;
+  }
+  translateRail();
+}
+
+// 卡片层整体跟着 PDF 的滚动位置平移
+function translateRail() {
+  const box = $('#itemList');
+  const rail = box.querySelector('.rail');
+  if (!rail) return;
+  const c = $('#pdfContainer');
+  const dy = c.getBoundingClientRect().top - box.getBoundingClientRect().top - c.scrollTop;
+  rail.style.transform = `translateY(${dy}px)`;
+}
+
+function initRail() {
+  on('pdf-scroll', () => { if ($('#itemList').classList.contains('rail-mode')) translateRail(); });
+  on('pdf-layout', () => { if ($('#itemList').classList.contains('rail-mode')) scheduleLayout(); });
+  addEventListener('resize', () => scheduleLayout());
+  new ResizeObserver(() => translateRail()).observe($('#jobBar'));
+  // 在卡片栏上滚滚轮 = 滚 PDF（卡片里能自己滚的，比如长引用，先让它滚）
+  $('#itemList').addEventListener('wheel', (ev) => {
+    if (!ev.currentTarget.classList.contains('rail-mode') || ev.ctrlKey) return;
+    for (let el = ev.target; el && el !== ev.currentTarget; el = el.parentElement) {
+      if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
+    }
+    ev.preventDefault();
+    $('#pdfContainer').scrollBy({ top: ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY });
+  }, { passive: false });
+}
+
+// 小卡片：状态、skill、改了哪几个字，✓ 接受 / ✗ 驳回
+function miniCard(it) {
+  const b = (label, title, fn, cls) => h('button', { class: `icon-btn ${cls}`, title, onclick: guard(async (ev) => { ev.stopPropagation(); await fn(); }) }, label);
+  const acts = [];
+  if (it.status === 'proposed' && !it.conflict && !it.stale) acts.push(b('✓', rejectedOf(it).size ? '接受其余修改' : '接受并写入', () => acceptItem(it), 'ok'));
+  if (it.status === 'proposed') acts.push(b('✗', '驳回', async () => { const r = prompt('驳回这条方案？可以写一句原因（可不填）：', ''); if (r !== null) await api('POST', `/api/items/${it.id}/reject`, { reason: r }); }, 'no'));
+  if (it.status === 'replied') acts.push(b('✓', '知道了，关闭', () => api('POST', `/api/items/${it.id}/reject`, {}), 'ok'));
+  return h('div', { class: `mcard st-${it.status}`, 'data-id': it.id, title: it.proposal?.summary || '', onclick: () => emit('select-item', { id: it.id, from: 'sidebar' }) },
+    h('div', { class: 'mcard-head' },
+      h('span', { class: `tag ${it.status}` }, STATUS[it.status]),
+      (it.stale || it.conflict) && h('span', { class: 'tag stale' }, it.stale ? '原文已改' : '冲突'),
+      it.kind === 'polish' ? h('span', { class: 'tag skill' }, it.skill) : h('span', { class: 'tag' }, '批注'),
+      it.job && h('span', { class: 'muted' }, `${it.job.index}/${it.job.total}`),
+      h('span', { class: 'spacer' }),
+      ...acts),
+    h('div', { class: 'mcard-text' }, ...miniText(it)));
+}
+
+function miniText(it) {
+  if ((it.status === 'proposed' || it.status === 'accepted') && it.proposal) {
+    // 像 Overleaf 那样只列改动：删的红色删除线、加的绿色
+    const out = [];
+    let n = 0;
+    for (const e of it.proposal.edits) {
+      if (e.skipped) continue;
+      const ops = diffWords(e.original, e.replacement).filter((o) => o.op !== 'eq');
+      for (let i = 0; i < ops.length && n < 5; i++) {
+        out.push(h(ops[i].op, {}, short(ops[i].text, 18)));
+        if (!(ops[i].op === 'del' && ops[i + 1]?.op === 'ins')) { out.push(' '); n++; }
+      }
+      if (n >= 5) break;
+    }
+    return out.length ? out : [it.proposal.summary || ''];
+  }
+  if (it.status === 'replied') {
+    const m = [...it.thread].reverse().find((x) => x.role === 'agent');
+    return [m ? `agent：${m.text}` : ''];
+  }
+  if (it.comment) return [`意见：${it.comment}`];
+  return [short(it.anchor.pdfText || it.anchor.quote, 60)];
 }

@@ -35,6 +35,7 @@ export function initPdf() {
   // 滚动时记下当前页和页内位置
   let posTimer = null;
   container.addEventListener('scroll', () => {
+    emit('pdf-scroll');
     if (!posReady) return;
     clearTimeout(posTimer);
     posTimer = setTimeout(() => {
@@ -46,7 +47,9 @@ export function initPdf() {
   }, { passive: true });
   eventBus.on('scalechanging', ({ scale }) => {
     $('#zoomLabel').textContent = `${Math.round(scale * 100)}%`;
+    requestAnimationFrame(() => emit('pdf-layout'));
   });
+  eventBus.on('pagesinit', () => requestAnimationFrame(() => emit('pdf-layout')));
   eventBus.on('pagechanging', ({ pageNumber }) => { $('#pageInput').value = pageNumber; });
   eventBus.on('pagerendered', ({ pageNumber }) => drawPage(pageNumber));
   eventBus.on('textlayerrendered', ({ pageNumber }) => drawPage(pageNumber));
@@ -323,22 +326,30 @@ async function locate(file, lines, sourceSnippet, fallbackPage) {
 // 返回 { map, r: [起, 止], exact }；exact 时投影串第 k 个字对应 PDF 上第 r[0]+k 个字
 async function locateSpan(file, lines, sourceSnippet, fallbackPage) {
   if (!doc) return null;
-  const needleFull = projectSource(sourceSnippet).chars;
-  if (needleFull.length < 2) return null;
+  const needle = projectSource(sourceSnippet).chars;
+  if (needle.length < 2) return null;
+  if (fallbackPage) {
+    const quick = await searchAround(needle, fallbackPage);
+    if (quick?.exact) return quick;
+  }
   const center = await guessPage(file, lines, fallbackPage);
-  if (!center) return null;
+  return center ? searchAround(needle, center) : null;
+}
+
+// 在 center-1 .. center+2 页的文字里找 needle（投影串）
+async function searchAround(needle, center) {
   const pages = [];
   for (let n = Math.max(1, center - 1); n <= Math.min(doc.numPages, center + 2); n++) pages.push(n);
   const parts = await Promise.all(pages.map(pageText));
-  const chars = parts.map((p) => p.chars).join('');
-  const map = parts.flatMap((p) => p.map);
+  const chars = parts.map((x) => x.chars).join('');
+  const map = parts.flatMap((x) => x.map);
   // 长段落只用首尾各一截定位，中间按顺序连起来
   let r;
-  if (needleFull.length > 400) {
-    const h = findSpan(chars, needleFull.slice(0, 120));
-    const t = h && findSpan(chars.slice(h[1]), needleFull.slice(-120));
+  if (needle.length > 400) {
+    const h = findSpan(chars, needle.slice(0, 120));
+    const t = h && findSpan(chars.slice(h[1]), needle.slice(-120));
     r = h && t ? [h[0], h[1] + t[1], false] : h && [h[0], h[1], false];
-  } else r = findSpan(chars, needleFull);
+  } else r = findSpan(chars, needle);
   if (!r) return null;
   return { map, r, exact: !!r[2] };
 }
@@ -421,6 +432,25 @@ export function redrawAll() {
     const pv = pageView(i);
     if (pv?.div?.querySelector('canvas, .canvasWrapper')) drawPage(i);
   }
+}
+
+// ---- 给注释栏的卡片对齐用 ----
+
+export const pdfReady = () => !!doc;
+
+// 某页某处（页内比例 fy）在 PDF 内容里的纵向位置（像素，随缩放变化，所以每次现算）
+export function pageOffset(page, fy) {
+  const pv = pageView(page);
+  if (!pv?.div) return null;
+  return pv.div.offsetTop + pv.div.clientTop + fy * pv.div.clientHeight;
+}
+
+// 一条批注在 PDF 上的位置：{ page, fy }，找不到返回 null
+export async function itemAnchor(it) {
+  const rs = await boxesFor(it);
+  if (!rs.length) return null;
+  const r = rs.reduce((m, x) => (x.page < m.page || (x.page === m.page && x.fy < m.fy) ? x : m));
+  return { page: r.page, fy: r.fy };
 }
 
 // ---- 跳转 ----

@@ -14,6 +14,8 @@ function setMode(mode) {
   $('#readView').hidden = mode !== 'read';
   $('#reviewView').hidden = mode !== 'review';
   if (mode === 'review') renderReview();
+  renderSidebar();
+  renderJobs();
 }
 
 function renderChangesBtn() {
@@ -180,12 +182,21 @@ function initSplitter() {
   });
 }
 
+// 取消选中：高亮撤掉，展开的卡片收起
+function clearActive() {
+  state.activeId = null;
+  localStorage.removeItem('activeId');
+  document.querySelectorAll('.pcard.active').forEach((c) => c.classList.remove('active'));
+  refreshMarks(); redrawAll(); renderSidebar();
+}
+
 async function selectItem({ id, from }) {
   const it = state.items.find((x) => x.id === id);
   if (!it) return;
   state.activeId = id;
   localStorage.setItem('activeId', id);
-  document.querySelectorAll('.card, .pcard').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
+  document.querySelectorAll('.pcard').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
+  renderSidebar();
   if (from === 'review') setMode('read');
   if (from !== 'source') await revealItem(it).catch(() => {});
   refreshMarks();
@@ -230,16 +241,14 @@ async function main() {
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') $('#modal').hidden = true; };
 
   on('select-item', selectItem);
+  on('clear-active', clearActive);
   on('file-opened', () => { renderSidebar(); renderJobs(); });
   on('chapter-filter', () => renderJobs());
   on('marks-changed', () => { refreshMarks(); redrawAll(); });
   // Esc：取消选中，高亮全部撤掉
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !state.activeId || !$('#selMenu').hidden) return;
-    state.activeId = null;
-    localStorage.removeItem('activeId');
-    document.querySelectorAll('.card.active, .pcard.active').forEach((c) => c.classList.remove('active'));
-    refreshMarks(); redrawAll();
+    clearActive();
   });
   on('open-review', (id) => {
     state.activeId = id;
@@ -260,6 +269,8 @@ async function main() {
   const first = state.files.find((f) => /chapter1/.test(f)) || state.files[0];
   await openFile(localStorage.getItem('lastFile') && state.files.includes(localStorage.getItem('lastFile')) ? localStorage.getItem('lastFile') : first);
   await loadPdf().catch((e) => toast(`PDF 加载失败：${e.message}`, true));
+  renderSidebar();
+  renderJobs();
   connect();
   if (localStorage.getItem('mode') === 'review') setMode('review');
   // 侧栏滚动位置：对照卡片是异步载入的，高度稳定后再恢复
