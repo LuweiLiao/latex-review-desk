@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "latex-review-desk",
+  "owner": {
+    "name": "LuweiLiao",
+    "url": "https://github.com/LuweiLiao"
+  },
+  "description": "LaTeX 审阅台：网页批注 + MCP 后台 agent。",
+  "plugins": [
+    {
+      "name": "latex-review-desk",
+      "source": "./",
+      "description": "LaTeX 审阅台的后台 agent skill：领取网页上的批注和润色请求，修改方案推回网页由用户确认。",
+      "license": "MIT",
+      "keywords": ["latex", "review", "mcp", "polishing"]
+    }
+  ]
+}

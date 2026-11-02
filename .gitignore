@@ -1,0 +1,14 @@
+node_modules/
+data/
+web/dist/
+web/vendor/
+/config.json
+examples/demo/*.pdf
+examples/demo/*.aux
+examples/demo/*.log
+examples/demo/*.fls
+examples/demo/*.fdb_latexmk
+examples/demo/*.synctex.gz
+examples/demo/*.xdv
+examples/demo/*.out
+examples/demo/.review-data/

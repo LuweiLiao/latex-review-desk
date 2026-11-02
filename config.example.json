@@ -1,0 +1,27 @@
+{
+  "port": 4317,
+  "projectRoot": "D:/path/to/your/latex-project",
+  "mainTex": "main.tex",
+  "pdf": "main.pdf",
+  "sourceDirs": ["chapters"],
+  "extraSources": ["main.tex"],
+  "tools": [
+    { "name": "latexmk", "command": "latexmk", "args": ["-xelatex", "-synctex=1", "-interaction=nonstopmode", "-file-line-error", "%DOCFILE%"] },
+    { "name": "xelatex", "command": "xelatex", "args": ["-synctex=1", "-interaction=nonstopmode", "-file-line-error", "-jobname=%JOBNAME%", "%DOCFILE%"] },
+    { "name": "pdflatex", "command": "pdflatex", "args": ["-synctex=1", "-interaction=nonstopmode", "-file-line-error", "-jobname=%JOBNAME%", "%DOCFILE%"] },
+    { "name": "bibtex", "command": "bibtex", "args": ["%JOBNAME%"] }
+  ],
+  "recipes": [
+    { "name": "latexmk (xelatex)", "tools": ["latexmk"] },
+    { "name": "xelatex", "tools": ["xelatex"] },
+    { "name": "pdflatex", "tools": ["pdflatex"] },
+    { "name": "xe->bib->xe->xe", "tools": ["xelatex", "bibtex", "xelatex", "xelatex"] },
+    { "name": "pdf->bib->pdf->pdf", "tools": ["pdflatex", "bibtex", "pdflatex", "pdflatex"] }
+  ],
+  "defaultRecipe": "latexmk (xelatex)",
+  "skillDirs": ["~/.claude/skills"],
+  "defaultSkill": "humanizer-zh",
+  "favoriteSkills": ["humanizer-zh", "shuorenhua", "stop-slop", "humanizer"],
+  "claimTimeoutMin": 30,
+  "waitTimeoutSec": 240
+}

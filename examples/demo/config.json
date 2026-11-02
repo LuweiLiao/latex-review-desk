@@ -1,0 +1,16 @@
+{
+  "port": 4318,
+  "projectRoot": "./examples/demo",
+  "mainTex": "main.tex",
+  "pdf": "main.pdf",
+  "sourceDirs": ["chapters"],
+  "extraSources": ["main.tex"],
+  "dataDir": "./examples/demo/.review-data",
+  "tools": [
+    { "name": "latexmk", "command": "latexmk", "args": ["-xelatex", "-synctex=1", "-interaction=nonstopmode", "-file-line-error", "%DOCFILE%"] }
+  ],
+  "recipes": [{ "name": "latexmk (xelatex)", "tools": ["latexmk"] }],
+  "skillDirs": ["~/.claude/skills"],
+  "defaultSkill": "humanizer-zh",
+  "favoriteSkills": ["humanizer-zh", "shuorenhua", "stop-slop", "humanizer"]
+}

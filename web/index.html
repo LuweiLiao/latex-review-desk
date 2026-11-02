@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <title>论文审阅台</title>
+  <link rel="stylesheet" href="/vendor/pdfjs/pdf_viewer.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">论文审阅台</div>
+    <nav class="tabs">
+      <button data-mode="read" class="active">阅读</button>
+      <button data-mode="review">修改方案 <span id="proposalCount" class="count"></span></button>
+    </nav>
+    <div id="dirtyBanner" class="banner" hidden></div>
+    <div class="spacer"></div>
+    <div id="agentStatus" class="pill" title="后台 agent 状态">agent 离线</div>
+    <select id="recipeSelect" title="编译配方"></select>
+    <button id="compileBtn" class="btn">重新编译</button>
+    <button id="stopBtn" class="btn danger" hidden>终止</button>
+    <div id="compileStatus" class="pill clickable" title="查看编译日志"></div>
+  </header>
+
+  <main id="main">
+    <section id="readView" class="view">
+      <div id="srcPane" class="pane">
+        <div class="pane-bar">
+          <select id="fileSelect"></select>
+          <button class="btn small" id="polishChapterBtn" title="润色当前这一章（整个文件）；默认逐段，一段一段交给 agent">润色本章</button>
+          <button class="btn small" id="toPdfBtn" title="跳到 PDF 对应位置（也可 Ctrl+点击源码）">→ PDF</button>
+        </div>
+        <div id="editor"></div>
+      </div>
+      <div id="splitter"></div>
+      <div id="pdfPane" class="pane">
+        <div class="pane-bar">
+          <button class="btn small" id="zoomOut">−</button>
+          <span id="zoomLabel">100%</span>
+          <button class="btn small" id="zoomIn">+</button>
+          <button class="btn small" id="zoomFit">适合宽度</button>
+          <span class="sep"></span>
+          <input id="pageInput" type="number" min="1" value="1"> / <span id="pageCount">-</span>
+          <span class="spacer"></span>
+          <label class="chk" title="不勾选时只高亮当前选中的那条"><input type="checkbox" id="showMarks"> 显示全部批注</label>
+          <span class="hint">双击 PDF 跳到源码</span>
+        </div>
+        <div id="pdfContainer"><div id="pdfViewer" class="pdfViewer"></div></div>
+      </div>
+    </section>
+
+    <section id="reviewView" class="view" hidden>
+      <div class="review-bar">
+        <span id="reviewSummary"></span>
+        <span class="spacer"></span>
+        <button class="btn" id="acceptAllBtn">全部接受（无冲突的）</button>
+      </div>
+      <div id="reviewList"></div>
+    </section>
+
+    <div id="sideSplitter" title="拖动调整侧栏宽度"></div>
+    <aside id="sidebar">
+      <div class="side-head">
+        <b id="sideTitle">注释</b>
+        <span class="spacer"></span>
+        <select id="statusFilter">
+          <option value="open">未完成</option>
+          <option value="pending">待处理</option>
+          <option value="proposed">待确认</option>
+          <option value="accepted">已接受</option>
+          <option value="rejected">已驳回</option>
+          <option value="all">全部</option>
+        </select>
+        <select id="sortOrder">
+          <option value="pos">按位置</option>
+          <option value="time">按时间</option>
+        </select>
+      </div>
+      <div id="jobBar"></div>
+      <div id="itemList"></div>
+    </aside>
+  </main>
+
+  <div id="selMenu" class="popover" hidden></div>
+  <div id="modal" class="modal" hidden><div class="modal-box"><button class="modal-close">×</button><div class="modal-body"></div></div></div>
+  <div id="toasts"></div>
+
+  <script type="module" src="/dist/app.js"></script>
+</body>
+</html>
