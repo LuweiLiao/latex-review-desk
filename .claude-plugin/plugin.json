@@ -1,7 +1,7 @@
 {
   "name": "latex-review-desk",
   "description": "LaTeX 审阅台的后台 agent skill：领取网页上对 PDF/源码的批注和润色请求，按所选 skill 提修改方案推回网页，由用户对照确认后才写入。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "LuweiLiao",
     "url": "https://github.com/LuweiLiao"
@@ -9,6 +9,15 @@
   "homepage": "https://github.com/LuweiLiao/latex-review-desk",
   "repository": "https://github.com/LuweiLiao/latex-review-desk",
   "license": "MIT",
-  "keywords": ["latex", "review", "mcp", "polishing", "thesis", "synctex"],
-  "skills": ["./skills/thesis-review-agent"]
+  "keywords": [
+    "latex",
+    "review",
+    "mcp",
+    "polishing",
+    "thesis",
+    "synctex"
+  ],
+  "skills": [
+    "./skills/thesis-review-agent"
+  ]
 }

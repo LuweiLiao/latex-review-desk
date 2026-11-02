@@ -1,6 +1,6 @@
 {
   "name": "latex-review-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "本地 LaTeX 审阅台：PDF/源码对照阅读、批注、按 skill 润色，经 MCP 交给后台 agent 处理，修改方案在网页对照确认后才写入",
   "type": "module",
