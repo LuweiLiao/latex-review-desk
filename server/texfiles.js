@@ -1,4 +1,5 @@
 // 论文源文件的读写。内部统一用 \n 换行、去掉 BOM，写回时恢复文件原来的换行风格。
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -51,7 +52,8 @@ export class TexFiles {
     const bom = raw.charCodeAt(0) === 0xfeff;
     if (bom) raw = raw.slice(1);
     const eol = raw.includes('\r\n') ? '\r\n' : '\n';
-    const entry = { rel: r, mtimeMs: st.mtimeMs, size: st.size, text: raw.replace(/\r\n/g, '\n'), eol, bom };
+    const text = raw.replace(/\r\n/g, '\n');
+    const entry = { rel: r, mtimeMs: st.mtimeMs, size: st.size, text, eol, bom, hash: hashText(text) };
     this.cache.set(r, entry);
     return entry;
   }
@@ -67,6 +69,19 @@ export class TexFiles {
     fs.renameSync(tmp, abs);
     this.cache.delete(r);
     return this.read(r);
+  }
+
+  // 网页编辑器保存：baseHash 是网页打开（或上次保存）时的版本。
+  // 磁盘上的内容已经变了（别的编辑器保存、接受了方案）就不覆盖，返回 conflict。
+  save(rel, text, baseHash, force = false) {
+    const cur = this.read(rel);
+    const incoming = String(text).replace(/\r\n/g, '\n');
+    if (!force && baseHash && cur.hash !== baseHash && cur.text !== incoming) {
+      return { conflict: true, hash: cur.hash, text: cur.text };
+    }
+    if (cur.text === incoming) return { conflict: false, hash: cur.hash, unchanged: true };
+    const next = this.write(rel, incoming);
+    return { conflict: false, hash: next.hash };
   }
 
   invalidate(rel) {
@@ -86,6 +101,10 @@ function fileOrder(a, b) {
     return 500;
   };
   return rank(a) - rank(b) || a.localeCompare(b);
+}
+
+export function hashText(text) {
+  return crypto.createHash('sha1').update(text).digest('hex').slice(0, 16);
 }
 
 // ---- 文本坐标工具（offset 都基于 \n 换行的文本） ----

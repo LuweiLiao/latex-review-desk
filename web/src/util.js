@@ -1,4 +1,8 @@
+let beforeWrite = null;
+export function setBeforeWrite(fn) { beforeWrite = fn; }
+
 export async function api(method, url, body) {
+  if (method !== 'GET' && beforeWrite && !url.startsWith('/api/file')) await beforeWrite();
   const res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},

@@ -1,11 +1,11 @@
-// 左侧只读源码视图
-import { EditorState, StateEffect, StateField } from '@codemirror/state';
+// 左侧源码编辑器：可以直接改，停手 1 秒自动保存（Ctrl+S 立即保存）
+import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
-import { defaultKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { StreamLanguage, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { api, $, OPEN } from './util.js';
+import { api, $, h, OPEN, setBeforeWrite, toast } from './util.js';
 import { state, emit, markedItems } from './state.js';
 
 const setMarks = StateEffect.define();
@@ -33,8 +33,91 @@ const flashField = StateField.define({
 
 let view;
 let selecting = false; // 本次鼠标按下是否从源码区开始
-let current = null; // { path, mtime }
+let current = null; // { path, hash }
 const scrollPos = new Map();
+
+// ---- 保存 ----
+// 用户改了文字 -> edits 加一；保存成功时记下当时的 edits，相等就是“已保存”
+const remote = Annotation.define(); // 服务端推来的内容，不算用户改动
+let edits = 0, savedAt = 0, saveTimer = null, saving = null, conflict = null;
+
+const isDirty = () => edits !== savedAt;
+
+function setStatus() {
+  const el = $('#saveStatus');
+  if (!el) return;
+  if (conflict) { el.textContent = '有冲突'; el.className = 'save-status err'; return; }
+  if (saving) { el.textContent = '保存中…'; el.className = 'save-status'; return; }
+  if (isDirty()) { el.textContent = '未保存'; el.className = 'save-status dirty'; return; }
+  el.textContent = current ? '已保存' : '';
+  el.className = 'save-status ok';
+}
+
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => save(), 1000);
+}
+
+// 立即保存；正在保存时等它完，再看还有没有新改动
+export async function save(force = false) {
+  clearTimeout(saveTimer);
+  if (saving) await saving;
+  if (!current || (!isDirty() && !force) || (conflict && !force)) return;
+  const path = current.path, at = edits, text = view.state.doc.toString();
+  saving = (async () => {
+    try {
+      const res = await fetch('/api/file', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, text, baseHash: current.hash, force }) });
+      const data = await res.json();
+      if (current?.path !== path) return;
+      if (res.status === 409) { showConflict(data); return; }
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      current.hash = data.hash;
+      savedAt = at;
+      conflict = null;
+      $('#conflictBar').hidden = true;
+    } catch (e) {
+      toast(`保存失败：${e.message}`, true);
+    }
+  })();
+  setStatus();
+  await saving;
+  saving = null;
+  setStatus();
+  if (isDirty() && !conflict) scheduleSave();
+}
+
+// 磁盘上的文件在网页改动期间被别处改了：让用户选留哪一份
+function showConflict(disk) {
+  conflict = disk;
+  const bar = $('#conflictBar');
+  bar.replaceChildren(
+    h('span', {}, '这个文件刚被别处改过（其他编辑器保存，或接受了修改方案），和你在这里没保存的改动冲突。'),
+    h('button', { class: 'btn small', onclick: () => { applyRemote(disk.text); current.hash = disk.hash; savedAt = edits; conflict = null; bar.hidden = true; setStatus(); } }, '用磁盘上的版本'),
+    h('button', { class: 'btn small danger', onclick: () => { conflict = null; bar.hidden = true; save(true); } }, '用我这里的版本覆盖'),
+  );
+  bar.hidden = false;
+  setStatus();
+}
+
+// 换成新内容，只改有差别的那一段，光标和滚动位置不动
+function applyRemote(text) {
+  const old = view.state.doc.toString();
+  if (old === text) return;
+  let a = 0;
+  const max = Math.min(old.length, text.length);
+  while (a < max && old.charCodeAt(a) === text.charCodeAt(a)) a++;
+  let b = 0;
+  while (b < max - a && old.charCodeAt(old.length - 1 - b) === text.charCodeAt(text.length - 1 - b)) b++;
+  view.dispatch({ changes: { from: a, to: old.length - b, insert: text.slice(a, text.length - b) }, annotations: remote.of(true) });
+}
+
+const trackEdits = EditorView.updateListener.of((u) => {
+  if (!u.docChanged || u.transactions.every((t) => t.annotation(remote))) return;
+  edits++;
+  setStatus();
+  scheduleSave();
+  emit('hide-quick-menu');
+});
 
 export function initSource() {
   view = new EditorView({
@@ -61,6 +144,8 @@ export function initSource() {
   });
 
   $('#fileSelect').addEventListener('change', (e) => openFile(e.target.value));
+  setBeforeWrite(() => save());
+  window.addEventListener('beforeunload', (ev) => { if (isDirty() || conflict) { ev.preventDefault(); ev.returnValue = ''; } });
   $('#toPdfBtn').addEventListener('click', () => {
     if (!current) return;
     const head = view.state.selection.main.head;
@@ -105,11 +190,16 @@ function makeState(doc) {
       lineNumbers(),
       highlightActiveLine(),
       highlightSelectionMatches(),
-      keymap.of([...defaultKeymap, ...searchKeymap]),
+      history(),
+      keymap.of([
+        { key: 'Mod-s', preventDefault: true, run: () => { save(); return true; } },
+        indentWithTab,
+        ...defaultKeymap, ...historyKeymap, ...searchKeymap,
+      ]),
       StreamLanguage.define(stex),
       syntaxHighlighting(defaultHighlightStyle),
       EditorView.lineWrapping,
-      EditorState.readOnly.of(true),
+      trackEdits,
       marksField,
       flashField,
       clickHandlers,
@@ -124,14 +214,22 @@ export function fillFileSelect() {
   if (keep && state.files.includes(keep)) sel.value = keep;
 }
 
-export async function openFile(path, { keepScroll = false } = {}) {
+export async function openFile(path) {
   if (!path) return;
-  if (current) scrollPos.set(current.path, view.scrollDOM.scrollTop);
+  if (current?.path === path) return;
+  if (current) {
+    await save();
+    if (conflict) { $('#fileSelect').value = current.path; return toast('先处理当前文件的保存冲突', true); }
+    scrollPos.set(current.path, view.scrollDOM.scrollTop);
+  }
   const data = await api('GET', `/api/file?path=${encodeURIComponent(path)}`);
-  const same = current?.path === path;
-  const top = keepScroll && same ? view.scrollDOM.scrollTop : scrollPos.get(path) ?? 0;
-  current = { path, mtime: data.mtime };
+  const top = scrollPos.get(path) ?? 0;
+  current = { path, hash: data.hash };
+  edits = savedAt = 0;
+  conflict = null;
+  $('#conflictBar').hidden = true;
   view.setState(makeState(data.text));
+  setStatus();
   $('#fileSelect').value = path;
   refreshMarks();
   requestAnimationFrame(() => { view.scrollDOM.scrollTop = top; });
@@ -139,8 +237,17 @@ export async function openFile(path, { keepScroll = false } = {}) {
 
 export function currentFile() { return current?.path; }
 
+// 文件在磁盘上变了（接受了方案、撤销、别的编辑器保存、自己刚保存）
 export async function reloadIfChanged(changed) {
-  if (current && changed.includes(current.path)) await openFile(current.path, { keepScroll: true });
+  if (!current || !changed.includes(current.path)) return;
+  if (saving) await saving;
+  const path = current.path;
+  const data = await api('GET', `/api/file?path=${encodeURIComponent(path)}`);
+  if (current?.path !== path || data.hash === current.hash) return; // 是自己刚存的
+  if (isDirty()) return showConflict(data);
+  applyRemote(data.text);
+  current.hash = data.hash;
+  refreshMarks();
 }
 
 // 在当前文件里找每条请求的原文位置

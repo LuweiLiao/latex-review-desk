@@ -186,3 +186,24 @@ test('误点驳回后可以恢复方案', async () => {
   review.accept(it.id);
   assert.equal(review.find(it.id).status, 'accepted');
 });
+
+test('网页编辑器保存：版本对得上才写，被别处改过时报冲突', () => {
+  const { files, raw, root } = setup();
+  const f = files.read('content/ch3.tex');
+  const edited = f.text.replace('第二段文字', '第二段正文');
+  const r1 = files.save('content/ch3.tex', edited, f.hash);
+  assert.equal(r1.conflict, false);
+  assert.ok(raw().includes('第二段正文'));
+  assert.ok(raw().includes('\r\n'), '保留 CRLF');
+  // 外部编辑器改了文件，网页还拿着旧版本号保存 -> 冲突，不覆盖
+  fs.writeFileSync(path.join(root, 'content', 'ch3.tex'), raw().replace('第二段正文', '外部改动'));
+  files.invalidate();
+  const r2 = files.save('content/ch3.tex', edited.replace('吊车', '起重'), r1.hash);
+  assert.equal(r2.conflict, true);
+  assert.ok(r2.text.includes('外部改动'));
+  assert.ok(raw().includes('外部改动'), '冲突时不写入');
+  // 强制覆盖
+  const r3 = files.save('content/ch3.tex', edited, r1.hash, true);
+  assert.equal(r3.conflict, false);
+  assert.ok(raw().includes('第二段正文'));
+});

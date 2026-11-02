@@ -13,6 +13,7 @@ export function initMenu() {
     else showMenu();
   });
   on('hide-menu', hide);
+  on('hide-quick-menu', () => { if (mode === 'menu') hide(); });
   document.addEventListener('mousedown', (ev) => {
     if (mode === 'menu' && !$('#selMenu').contains(ev.target)) hide();
   }, true);

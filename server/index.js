@@ -79,7 +79,15 @@ app.get('/api/files', (req, res) => res.json(files.list()));
 
 app.get('/api/file', (req, res) => {
   const f = files.read(String(req.query.path));
-  res.json({ path: f.rel, text: f.text, mtime: f.mtimeMs });
+  res.json({ path: f.rel, text: f.text, mtime: f.mtimeMs, hash: f.hash });
+});
+
+// 网页编辑器保存（自动保存 / Ctrl+S）
+app.put('/api/file', (req, res) => {
+  const { path: p, text, baseHash, force } = req.body || {};
+  if (typeof text !== 'string') throw new Error('缺少 text');
+  const r = files.save(String(p), text, baseHash, !!force);
+  res.status(r.conflict ? 409 : 200).json(r);
 });
 
 app.get('/api/skills', (req, res) => res.json(listSkills(cfg).map(({ name, description, dir }) => ({ name, description, dir }))));

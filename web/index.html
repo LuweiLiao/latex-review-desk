@@ -29,8 +29,10 @@
         <div class="pane-bar">
           <select id="fileSelect"></select>
           <button class="btn small" id="polishChapterBtn" title="润色当前这一章（整个文件）；默认逐段，一段一段交给 agent">润色本章</button>
+          <span id="saveStatus" class="save-status"></span>
           <button class="btn small" id="toPdfBtn" title="跳到 PDF 对应位置（也可 Ctrl+点击源码）">→ PDF</button>
         </div>
+        <div id="conflictBar" class="conflict-bar" hidden></div>
         <div id="editor"></div>
       </div>
       <div id="splitter"></div>

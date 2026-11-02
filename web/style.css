@@ -230,3 +230,11 @@ details.why > div { margin: 4px 0 0 2px; }
 .cdiff .toggle:hover, .idiff .toggle:hover { outline: 1px solid #7b5bd6; }
 .cdiff .kept, .idiff .kept { background: #eef0f3; color: #555; text-decoration: none; border-bottom: 1px dotted #999; }
 .chunk-tip { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* 源码编辑：保存状态、冲突提示 */
+.save-status { font-size: 12px; color: var(--muted); min-width: 44px; }
+.save-status.dirty { color: #a35b00; }
+.save-status.ok { color: #1b7a33; }
+.save-status.err { color: #c62828; font-weight: 600; }
+.conflict-bar { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: #fdecec; color: #a82020; font-size: 13px; border-bottom: 1px solid #f3c5c5; }
+#editor .cm-content { caret-color: #222; }
