@@ -414,7 +414,9 @@ function stepItem(dir) {
     if (i === -1) i = dir > 0 ? 0 : list.length - 1;
   } else {
     i += dir;
-    if (i < 0 || i >= list.length) return toast(dir > 0 ? '已经是最后一处' : '已经是第一处');
+    // 到头就绕回另一头
+    if (i >= list.length) { i = 0; toast('已回到第一处'); }
+    else if (i < 0) { i = list.length - 1; toast('已到最后一处'); }
   }
   emit('select-item', { id: list[i].id, from: 'nav' });
 }
