@@ -255,8 +255,8 @@ details.why > div { margin: 4px 0 0 2px; }
 .btn.chg-small { background: #fff6d6; border-color: #ecd27a; color: #7a5a00; }
 
 /* 贴边卡片：跟着 PDF 滚动，贴在对应文字的高度 */
-#itemList.rail-mode { position: relative; overflow: hidden; padding: 0; }
-.rail { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+#itemList.rail-mode { position: relative; overflow-y: auto; overflow-x: hidden; padding: 0; }
+.rail { position: absolute; left: 0; right: 0; top: 0; }
 .rail-card { position: absolute; left: 8px; right: 8px; margin: 0 !important; transition: top .18s ease; }
 .rail .card.rail-card { z-index: 2; box-shadow: 0 4px 18px rgba(0, 0, 0, .16); }
 .mcard { background: #fff; border: 1px solid #e3e4e7; border-left: 3px solid #c9cbd0; border-radius: 6px; padding: 4px 8px 5px; cursor: pointer; font-size: 12.5px; }
@@ -272,3 +272,10 @@ details.why > div { margin: 4px 0 0 2px; }
 .icon-btn { border: 0; background: none; cursor: pointer; font-size: 14px; padding: 0 5px; line-height: 20px; border-radius: 4px; color: #666; }
 .icon-btn.ok:hover { background: #dcf3e1; color: #1b7a33; }
 .icon-btn.no:hover { background: #fde3e3; color: #c62828; }
+
+/* 注释栏头部：上一处 / 下一处 */
+.side-head { gap: 6px; }
+.side-head #sideTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nav-group { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.nav-group .btn.small { padding: 0 6px; line-height: 20px; font-size: 11px; }
+#navPos { min-width: 34px; text-align: center; font-size: 12px; }

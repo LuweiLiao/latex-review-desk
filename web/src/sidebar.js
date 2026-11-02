@@ -78,6 +78,7 @@ function visible() {
 
 export function renderSidebar() {
   fillChapterFilter();
+  updateNav();
   const list = visible();
   const box = $('#itemList');
   const scope = scopeFile();
@@ -320,7 +321,6 @@ function renderRail(list, box) {
     return { it, el };
   });
   box.replaceChildren(rail);
-  box.scrollTop = 0;
   layoutRail(true);
 }
 
@@ -359,30 +359,71 @@ function layoutRail(first = false) {
   translateRail();
 }
 
-// 卡片层整体跟着 PDF 的滚动位置平移
+// 卡片栏自己可以滚（右边有滚动条），和 PDF 双向同步：
+// 卡片层高度和 PDF 内容一样，卡片栏的 scrollTop 始终等于 PDF 的 scrollTop
+let ignoreBox = 0, ignorePdf = 0; // 程序同步引起的滚动事件，在这个时间之前的忽略
+
 function translateRail() {
   const box = $('#itemList');
   const rail = box.querySelector('.rail');
   if (!rail) return;
   const c = $('#pdfContainer');
-  const dy = c.getBoundingClientRect().top - box.getBoundingClientRect().top - c.scrollTop;
-  rail.style.transform = `translateY(${dy}px)`;
+  // 卡片的 top 用 PDF 内容坐标；两个滚动区的上沿不一样高，用 rail 的 top 补上
+  rail.style.top = `${c.getBoundingClientRect().top - box.getBoundingClientRect().top}px`;
+  rail.style.height = `${c.scrollHeight}px`;
+  if (Math.abs(box.scrollTop - c.scrollTop) > 1) {
+    ignoreBox = performance.now() + 120;
+    box.scrollTop = c.scrollTop;
+  }
 }
 
 function initRail() {
-  on('pdf-scroll', () => { if ($('#itemList').classList.contains('rail-mode')) translateRail(); });
-  on('pdf-layout', () => { if ($('#itemList').classList.contains('rail-mode')) scheduleLayout(); });
+  const box = $('#itemList');
+  on('pdf-scroll', () => {
+    if (!box.classList.contains('rail-mode') || performance.now() < ignorePdf) return;
+    translateRail();
+  });
+  // 拖卡片栏的滚动条、在卡片栏上滚滚轮：PDF 跟着滚
+  box.addEventListener('scroll', () => {
+    if (!box.classList.contains('rail-mode') || performance.now() < ignoreBox) return;
+    const c = $('#pdfContainer');
+    if (Math.abs(c.scrollTop - box.scrollTop) > 1) {
+      ignorePdf = performance.now() + 120;
+      c.scrollTop = box.scrollTop;
+    }
+  }, { passive: true });
+  on('pdf-layout', () => { if (box.classList.contains('rail-mode')) scheduleLayout(); });
   addEventListener('resize', () => scheduleLayout());
   new ResizeObserver(() => translateRail()).observe($('#jobBar'));
-  // 在卡片栏上滚滚轮 = 滚 PDF（卡片里能自己滚的，比如长引用，先让它滚）
-  $('#itemList').addEventListener('wheel', (ev) => {
-    if (!ev.currentTarget.classList.contains('rail-mode') || ev.ctrlKey) return;
-    for (let el = ev.target; el && el !== ev.currentTarget; el = el.parentElement) {
-      if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
-    }
-    ev.preventDefault();
-    $('#pdfContainer').scrollBy({ top: ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY });
-  }, { passive: false });
+  $('#prevItem').onclick = () => stepItem(-1);
+  $('#nextItem').onclick = () => stepItem(1);
+}
+
+// 上一处 / 下一处：按当前筛选和章节，沿论文中出现的顺序走
+function stepItem(dir) {
+  const list = visible().sort(byPosition);
+  if (!list.length) return toast('这个筛选下没有注释');
+  let i = list.findIndex((it) => it.id === state.activeId);
+  if (i === -1) {
+    // 没有选中时，从当前看到的位置往前 / 往后找
+    const c = $('#pdfContainer');
+    const mid = c.scrollTop + c.clientHeight * 0.3;
+    const ys = list.map((it) => { const a = anchorOf(it); return a ? pageOffset(a.page, a.fy) : null; });
+    if (dir > 0) i = ys.findIndex((y) => y != null && y > mid);
+    else for (let j = ys.length - 1; j >= 0; j--) if (ys[j] != null && ys[j] < mid) { i = j; break; }
+    if (i === -1) i = dir > 0 ? 0 : list.length - 1;
+  } else {
+    i += dir;
+    if (i < 0 || i >= list.length) return toast(dir > 0 ? '已经是最后一处' : '已经是第一处');
+  }
+  emit('select-item', { id: list[i].id, from: 'nav' });
+}
+
+function updateNav() {
+  const list = visible();
+  const i = list.sort(byPosition).findIndex((it) => it.id === state.activeId);
+  $('#navPos').textContent = list.length ? `${i === -1 ? '–' : i + 1}/${list.length}` : '';
+  $('#prevItem').disabled = $('#nextItem').disabled = !list.length;
 }
 
 // 小卡片：状态、skill、改了哪几个字，✓ 接受 / ✗ 驳回

@@ -276,9 +276,9 @@ async function main() {
   // 侧栏滚动位置：对照卡片是异步载入的，高度稳定后再恢复
   const side = $('#itemList');
   const sideTop = Number(localStorage.getItem('sideScroll') || 0);
-  if (sideTop) setTimeout(() => { side.scrollTop = sideTop; }, 1200);
+  if (sideTop) setTimeout(() => { if (!side.classList.contains('rail-mode')) side.scrollTop = sideTop; }, 1200);
   let sideTimer = null;
-  side.addEventListener('scroll', () => { clearTimeout(sideTimer); sideTimer = setTimeout(() => localStorage.setItem('sideScroll', String(side.scrollTop)), 300); }, { passive: true });
+  side.addEventListener('scroll', () => { if (side.classList.contains('rail-mode')) return; clearTimeout(sideTimer); sideTimer = setTimeout(() => localStorage.setItem('sideScroll', String(side.scrollTop)), 300); }, { passive: true });
 }
 
 main().catch((e) => { console.error(e); toast(e.message, true); });
