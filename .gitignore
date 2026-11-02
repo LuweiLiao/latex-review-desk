@@ -12,3 +12,4 @@ examples/demo/*.synctex.gz
 examples/demo/*.xdv
 examples/demo/*.out
 examples/demo/.review-data/
+examples/demo/*.synctex(busy)

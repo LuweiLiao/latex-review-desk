@@ -1,6 +1,6 @@
 import { api, $, h, toast, guard, short } from './util.js';
 import { state, on, emit } from './state.js';
-import { initSource, fillFileSelect, openFile, refreshMarks, revealItem, revealLine, revealRange, reloadIfChanged, currentFile } from './source.js';
+import { initSource, fillFileSelect, openFile, refreshMarks, revealItem, revealLine, revealRange, reloadIfChanged, currentFile, save } from './source.js';
 import { initPdf, loadPdf, redrawAll, revealItemInPdf, syncToPdf } from './pdfview.js';
 import { initSidebar, renderSidebar, scrollCardIntoView } from './sidebar.js';
 import { initMenu } from './menu.js';
@@ -186,9 +186,19 @@ async function main() {
   initSplitter();
 
   document.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
-  $('#compileBtn').onclick = guard(async () => {
+  const compile = async (fromKey = false) => {
     const r = await api('POST', '/api/compile', { recipe: $('#recipeSelect').value });
-    if (!r.started) toast('已经在编译了');
+    if (!r.started) toast(fromKey ? '已保存；上一次编译还没结束，结束后再按 Ctrl+S' : '已经在编译了');
+  };
+  $('#compileBtn').onclick = guard(() => compile());
+  // Ctrl+S：先保存左侧源码，再按顶部选的配方编译（编辑器外按也一样）
+  on('save-and-compile', guard(async () => { await save(); await compile(true); }));
+  document.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 's') {
+      if (ev.target.closest?.('.cm-editor')) return; // 编辑器里的由 CodeMirror 的快捷键处理
+      ev.preventDefault();
+      emit('save-and-compile');
+    }
   });
   $('#stopBtn').onclick = guard(() => api('POST', '/api/compile/stop'));
   $('#recipeSelect').onchange = (e) => localStorage.setItem('recipe', e.target.value);

@@ -192,7 +192,7 @@ function makeState(doc) {
       highlightSelectionMatches(),
       history(),
       keymap.of([
-        { key: 'Mod-s', preventDefault: true, run: () => { save(); return true; } },
+        { key: 'Mod-s', preventDefault: true, run: () => { emit('save-and-compile'); return true; } },
         indentWithTab,
         ...defaultKeymap, ...historyKeymap, ...searchKeymap,
       ]),

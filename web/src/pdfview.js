@@ -61,8 +61,8 @@ export async function loadPdf() {
   if (!state.pdf) return;
   const keep = doc ? { page: viewer.currentPageNumber, scale: viewer.currentScaleValue, top: $('#pdfContainer').scrollTop } : null;
   const url = `/pdf?v=${Math.round(state.pdf.mtime)}`;
-  loadingTask?.destroy();
-  loadingTask = pdfjsLib.getDocument({
+  const oldTask = loadingTask;
+  const task = pdfjsLib.getDocument({
     url,
     cMapUrl: '/vendor/pdfjs/cmaps/',
     cMapPacked: true,
@@ -70,8 +70,9 @@ export async function loadPdf() {
     wasmUrl: '/vendor/pdfjs/wasm/',
     iccUrl: '/vendor/pdfjs/iccs/',
   });
-  const newDoc = await loadingTask.promise;
-  const old = doc;
+  loadingTask = task;
+  const newDoc = await task.promise;
+  if (loadingTask !== task) { task.destroy(); return; } // 又来了更新的版本
   doc = newDoc;
   boxCache.clear();
   viewer.setDocument(doc);
@@ -84,7 +85,8 @@ export async function loadPdf() {
       requestAnimationFrame(() => { $('#pdfContainer').scrollTop = keep.top; });
     });
   }
-  old?.destroy();
+  // 新文档换上去之后再释放旧的（v6 的文档对象没有 destroy，要通过加载任务释放）
+  oldTask?.destroy();
 }
 
 // 双击处前后的一小段文字（文本层里的字）
