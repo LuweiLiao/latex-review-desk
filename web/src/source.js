@@ -34,7 +34,18 @@ const flashField = StateField.define({
 let view;
 let selecting = false; // 本次鼠标按下是否从源码区开始
 let current = null; // { path, hash }
-const scrollPos = new Map();
+// 每个文件的阅读位置：{ top: 视口顶部那一行的文档位置, cursor }
+const POS_KEY = 'srcPos';
+const posAll = () => { try { return JSON.parse(localStorage.getItem(POS_KEY) || '{}'); } catch { return {}; } };
+function rememberPos() {
+  if (!current || !view) return;
+  const top = view.lineBlockAtHeight(view.scrollDOM.scrollTop).from;
+  const all = posAll();
+  all[current.path] = { top, cursor: view.state.selection.main.head };
+  localStorage.setItem(POS_KEY, JSON.stringify(all));
+}
+let posTimer = null;
+const rememberSoon = () => { clearTimeout(posTimer); posTimer = setTimeout(rememberPos, 300); };
 
 // ---- 保存 ----
 // 用户改了文字 -> edits 加一；保存成功时记下当时的 edits，相等就是“已保存”
@@ -111,6 +122,8 @@ function applyRemote(text) {
   view.dispatch({ changes: { from: a, to: old.length - b, insert: text.slice(a, text.length - b) }, annotations: remote.of(true) });
 }
 
+const trackCursor = EditorView.updateListener.of((u) => { if (u.selectionSet) rememberSoon(); });
+
 const trackEdits = EditorView.updateListener.of((u) => {
   if (!u.docChanged || u.transactions.every((t) => t.annotation(remote))) return;
   edits++;
@@ -145,6 +158,8 @@ export function initSource() {
 
   $('#fileSelect').addEventListener('change', (e) => openFile(e.target.value));
   setBeforeWrite(() => save());
+  view.scrollDOM.addEventListener('scroll', rememberSoon, { passive: true });
+  window.addEventListener('pagehide', rememberPos);
   window.addEventListener('beforeunload', (ev) => { if (isDirty() || conflict) { ev.preventDefault(); ev.returnValue = ''; } });
   $('#toPdfBtn').addEventListener('click', () => {
     if (!current) return;
@@ -200,6 +215,7 @@ function makeState(doc) {
       syntaxHighlighting(defaultHighlightStyle),
       EditorView.lineWrapping,
       trackEdits,
+      trackCursor,
       marksField,
       flashField,
       clickHandlers,
@@ -220,10 +236,10 @@ export async function openFile(path) {
   if (current) {
     await save();
     if (conflict) { $('#fileSelect').value = current.path; return toast('先处理当前文件的保存冲突', true); }
-    scrollPos.set(current.path, view.scrollDOM.scrollTop);
+    rememberPos();
   }
   const data = await api('GET', `/api/file?path=${encodeURIComponent(path)}`);
-  const top = scrollPos.get(path) ?? 0;
+  const saved = posAll()[path];
   current = { path, hash: data.hash };
   edits = savedAt = 0;
   conflict = null;
@@ -232,7 +248,15 @@ export async function openFile(path) {
   setStatus();
   $('#fileSelect').value = path;
   refreshMarks();
-  requestAnimationFrame(() => { view.scrollDOM.scrollTop = top; });
+  localStorage.setItem('lastFile', path);
+  if (saved) {
+    const len = view.state.doc.length;
+    view.dispatch({ selection: { anchor: Math.min(saved.cursor ?? 0, len) } });
+    requestAnimationFrame(() => {
+      const at = Math.min(saved.top ?? 0, len);
+      view.scrollDOM.scrollTop = view.lineBlockAt(at).top;
+    });
+  }
   state.openFile = path;
   emit('file-opened', path);
 }

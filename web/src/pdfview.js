@@ -9,6 +9,7 @@ const pdfjsLib = globalThis.pdfjsLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
 
 let viewer, eventBus, linkService, doc = null, loadingTask = null;
+let restored = false, posReady = false; // 刷新后是否已恢复上次位置
 const boxCache = new Map(); // key -> [{page, fx, fy, fw, fh}]
 
 export function initPdf() {
@@ -20,7 +21,28 @@ export function initPdf() {
 
   eventBus.on('pagesinit', () => {
     viewer.currentScaleValue = localStorage.getItem('pdfScale') || 'page-width';
+    if (!restored) {
+      restored = true;
+      // 刷新网页：回到上次看到的页和页内位置
+      try {
+        const p = JSON.parse(localStorage.getItem('pdfPos') || 'null');
+        if (p?.page && p.page <= doc.numPages) requestAnimationFrame(() => scrollToPage(p.page, p.frac || 0));
+      } catch { /* 记录坏了就从头看 */ }
+    }
+    posReady = true;
   });
+  // 滚动时记下当前页和页内位置
+  let posTimer = null;
+  container.addEventListener('scroll', () => {
+    if (!posReady) return;
+    clearTimeout(posTimer);
+    posTimer = setTimeout(() => {
+      const pv = pageView(viewer.currentPageNumber);
+      if (!pv?.div) return;
+      const frac = (container.scrollTop - pv.div.offsetTop) / Math.max(1, pv.div.clientHeight);
+      localStorage.setItem('pdfPos', JSON.stringify({ page: viewer.currentPageNumber, frac: Math.max(0, Math.min(1, frac)) }));
+    }, 300);
+  }, { passive: true });
   eventBus.on('scalechanging', ({ scale }) => {
     $('#zoomLabel').textContent = `${Math.round(scale * 100)}%`;
   });
@@ -329,6 +351,13 @@ export function redrawAll() {
 }
 
 // ---- 跳转 ----
+
+// 精确滚到某页的某个位置（frac：页内从上往下的比例）
+function scrollToPage(page, frac) {
+  const pv = pageView(page);
+  if (!pv?.div) return;
+  $('#pdfContainer').scrollTop = pv.div.offsetTop + frac * pv.div.clientHeight;
+}
 
 function scrollToFrac(page, fy, fx = 0) {
   const pv = pageView(page);

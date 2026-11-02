@@ -9,6 +9,7 @@ import { renderJobs } from './jobs.js';
 
 function setMode(mode) {
   state.mode = mode;
+  localStorage.setItem('mode', mode);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
   $('#readView').hidden = mode !== 'read';
   $('#reviewView').hidden = mode !== 'review';
@@ -115,6 +116,11 @@ function connect() {
 
 function applyState(s) {
   state.items = s.items;
+  // 刷新后恢复上次选中的批注（只恢复高亮，不跳位置，位置由各栏自己恢复）
+  if (state.activeId == null) {
+    const a = localStorage.getItem('activeId');
+    if (a && s.items.some((it) => it.id === a)) state.activeId = a;
+  }
   state.files = s.files;
   state.fileTitles = s.fileTitles || {};
   state.agent = s.agent;
@@ -168,6 +174,7 @@ async function selectItem({ id, from }) {
   const it = state.items.find((x) => x.id === id);
   if (!it) return;
   state.activeId = id;
+  localStorage.setItem('activeId', id);
   document.querySelectorAll('.card, .pcard').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
   if (from === 'review') setMode('read');
   if (from !== 'source') await revealItem(it).catch(() => {});
@@ -214,6 +221,7 @@ async function main() {
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape' || !state.activeId || !$('#selMenu').hidden) return;
     state.activeId = null;
+    localStorage.removeItem('activeId');
     document.querySelectorAll('.card.active, .pcard.active').forEach((c) => c.classList.remove('active'));
     refreshMarks(); redrawAll();
   });
@@ -235,9 +243,15 @@ async function main() {
   state.skills = await api('GET', '/api/skills');
   const first = state.files.find((f) => /chapter1/.test(f)) || state.files[0];
   await openFile(localStorage.getItem('lastFile') && state.files.includes(localStorage.getItem('lastFile')) ? localStorage.getItem('lastFile') : first);
-  $('#fileSelect').addEventListener('change', () => localStorage.setItem('lastFile', currentFile()));
   await loadPdf().catch((e) => toast(`PDF 加载失败：${e.message}`, true));
   connect();
+  if (localStorage.getItem('mode') === 'review') setMode('review');
+  // 侧栏滚动位置：对照卡片是异步载入的，高度稳定后再恢复
+  const side = $('#itemList');
+  const sideTop = Number(localStorage.getItem('sideScroll') || 0);
+  if (sideTop) setTimeout(() => { side.scrollTop = sideTop; }, 1200);
+  let sideTimer = null;
+  side.addEventListener('scroll', () => { clearTimeout(sideTimer); sideTimer = setTimeout(() => localStorage.setItem('sideScroll', String(side.scrollTop)), 300); }, { passive: true });
 }
 
 main().catch((e) => { console.error(e); toast(e.message, true); });
