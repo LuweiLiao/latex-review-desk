@@ -83,6 +83,14 @@ button, select, input, textarea { font: inherit; }
 .hl.other { border-bottom: 1px dashed rgba(184, 162, 74, .9); }
 .hl.active { background: rgba(255, 213, 79, .4); border-bottom: 2px solid rgba(224, 177, 0, .9); }
 .hl.active.st-proposed, .hl.active.st-accepted { background: rgba(47, 111, 222, .2); border-bottom-color: rgba(47, 111, 222, .9); }
+/* 公式框：像 WPS 的内嵌公式，只画在网页上；不接鼠标，悬停和单击按坐标判断 */
+.fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.fbox { position: absolute; border: 1px solid rgba(70, 110, 200, .28); background: rgba(70, 110, 200, .045); border-radius: 2px; transition: background .12s, border-color .12s; }
+.fbox.display { border-color: rgba(70, 110, 200, .35); border-radius: 3px; }
+.fx-layer.hover-only .fbox:not(.hover):not(.selected) { border-color: transparent; background: transparent; }
+.fbox.hover { border-color: rgba(47, 111, 222, .75); background: rgba(47, 111, 222, .1); }
+.fbox.selected { border: 1.5px solid #2f6fde; background: rgba(47, 111, 222, .12); box-shadow: 0 0 0 2px rgba(47, 111, 222, .15); }
+#pdfContainer.on-formula .textLayer, #pdfContainer.on-formula .textLayer span { cursor: pointer; }
 .hl.flash { background: rgba(255, 82, 82, .28); border: 0; animation: fade 1.8s ease-out forwards; }
 @keyframes fade { 0%, 60% { opacity: 1; } to { opacity: 0; } }
 
@@ -279,3 +287,8 @@ details.why > div { margin: 4px 0 0 2px; }
 .nav-group { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
 .nav-group .btn.small { padding: 0 6px; line-height: 20px; font-size: 11px; }
 #navPos { min-width: 34px; text-align: center; font-size: 12px; }
+.formula-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; max-width: 340px; }
+.formula-head .tag { background: #e3ebfb; color: #2f5fb3; flex: none; }
+.formula-head code { font-size: 11.5px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pane-bar .chk, .pane-bar .hint { white-space: nowrap; }
+.pane-bar .hint { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }

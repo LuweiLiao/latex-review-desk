@@ -9,6 +9,7 @@ import { mountMcp } from './mcp.js';
 import { listSkills } from './skills.js';
 import { Store } from './store.js';
 import { backward, forward } from './synctex.js';
+import { locateFormula } from './formula.js';
 import { locatePdfSelection } from './anchors.js';
 import { lineStarts, offsetToLine } from './texfiles.js';
 import { TexFiles } from './texfiles.js';
@@ -117,6 +118,9 @@ app.post('/api/locate', (req, res) => {
   const ls = lineStarts(text);
   res.json({ file: rel, line: offsetToLine(ls, r.start), from: r.start, to: r.end });
 });
+
+// PDF 上点到的公式 -> 源码里那一段公式
+app.post('/api/formula', (req, res) => res.json(locateFormula(files, req.body || {})));
 
 // ---- 请求 ----
 

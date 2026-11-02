@@ -1,11 +1,22 @@
 // 文字比对：PDF 文本层和 LaTeX 源码都“投影”成只含文字和数字的串再比。浏览器和服务端共用。
 export const KEEP = /[\p{L}\p{N}]/u;
 
+// PDF 里公式的字母是数学斜体（𝐶、𝜃、𝑫），NFKC 后变回普通字母，才能和源码比
+export function foldChar(ch) {
+  return ch.normalize('NFKC').toLowerCase();
+}
+
 export function normalizeText(s) {
   let out = '';
-  for (const ch of s) if (KEEP.test(ch)) out += ch.toLowerCase();
+  for (const raw of s) for (const ch of foldChar(raw)) if (KEEP.test(ch)) out += ch;
   return out;
 }
+
+// 希腊字母命令 -> 字母（PDF 里显示的就是这个字），var 变体并到同一个字
+const GREEK = {};
+'alpha:α beta:β gamma:γ delta:δ epsilon:ε varepsilon:ε zeta:ζ eta:η theta:θ vartheta:θ iota:ι kappa:κ lambda:λ mu:μ nu:ν xi:ξ pi:π varpi:π rho:ρ varrho:ρ sigma:σ varsigma:σ tau:τ upsilon:υ phi:φ varphi:φ chi:χ psi:ψ omega:ω'
+  .split(' ').forEach((p) => { const [k, v] = p.split(':'); GREEK[k] = v; GREEK[k[0].toUpperCase() + k.slice(1)] = v.toUpperCase(); });
+GREEK.ell = 'l';
 
 // 这些命令的参数在 PDF 里不会原样出现
 const SKIP_ARG = new Set([
@@ -29,6 +40,7 @@ export function projectSource(text, from = 0, to = text.length) {
     if (c === '\\') {
       const m = /^\\([a-zA-Z]+)\*?/.exec(text.slice(i, i + 40));
       if (m) {
+        if (GREEK[m[1]]) { chars += foldChar(GREEK[m[1]]); map.push(i); }
         i += m[0].length;
         if (SKIP_ARG.has(m[1])) {
           while (text[i] === ' ') i++;
@@ -42,7 +54,7 @@ export function projectSource(text, from = 0, to = text.length) {
     }
     const cp = text.codePointAt(i);
     const ch = String.fromCodePoint(cp);
-    if (KEEP.test(ch)) { chars += ch.toLowerCase(); map.push(i); }
+    for (const f of foldChar(ch)) if (KEEP.test(f)) { chars += f; map.push(i); }
     i += ch.length;
   }
   return { chars, map };

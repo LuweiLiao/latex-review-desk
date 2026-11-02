@@ -42,7 +42,8 @@ function showMenu() {
   mode = 'menu';
   const el = $('#selMenu');
   const desc = (n) => state.skills.find((s) => s.name === n)?.description || '';
-  el.replaceChildren(
+  el.replaceChildren(...[
+    pending.formula ? h('div', { class: 'formula-head' }, h('span', { class: 'tag' }, '公式'), h('code', {}, short(pending.quote.replace(/\s+/g, ' '), 70))) : null,
     h('div', { class: 'row' },
       h('button', { class: 'btn', onclick: () => showForm('comment') }, '批注'),
     ),
@@ -51,7 +52,7 @@ function showMenu() {
       ...favorites().map((n) => h('button', { class: 'btn chip', title: desc(n), onclick: () => showForm('polish', n) }, n)),
       h('button', { class: 'btn chip more', onclick: () => showForm('polish') }, '更多 skill…'),
     ),
-  );
+  ].filter(Boolean));
   place(el, pending.x, pending.y);
 }
 
