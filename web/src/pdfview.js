@@ -54,6 +54,32 @@ export function initPdf() {
   $('#zoomIn').onclick = () => setScale(Math.min(4, viewer.currentScale * 1.15));
   $('#zoomOut').onclick = () => setScale(Math.max(0.3, viewer.currentScale / 1.15));
   $('#zoomFit').onclick = () => setScale('page-width');
+
+  // Ctrl+滚轮 / 触摸板双指捏合：以鼠标所在位置为中心缩放；不按 Ctrl 的滚轮照常翻页
+  let saveTimer = null;
+  container.addEventListener('wheel', (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey) || !doc) return;
+    ev.preventDefault(); // 不让浏览器缩放整个网页
+    const dy = ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY; // 按行滚动的鼠标换算成像素
+    const cur = viewer.currentScale;
+    // 鼠标滚一格（120）约 15%，和 +/- 按钮一致；触摸板捏合的小步长会更细
+    const target = Math.min(4, Math.max(0.3, cur * Math.exp(-dy * 0.0012)));
+    if (Math.abs(target - cur) < 0.001) return;
+    // 记下鼠标下那一点在第几页、页内什么比例的位置
+    const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.page');
+    const pv = pageView(el ? +el.dataset.pageNumber : viewer.currentPageNumber);
+    const r0 = pv?.div.getBoundingClientRect();
+    const fx = r0 ? (ev.clientX - r0.left) / r0.width : 0, fy = r0 ? (ev.clientY - r0.top) / r0.height : 0;
+    viewer.currentScale = target;
+    // 缩放后把这一点挪回鼠标下
+    if (r0) {
+      const r1 = pv.div.getBoundingClientRect();
+      container.scrollTop += r1.top + fy * r1.height - ev.clientY;
+      container.scrollLeft += r1.left + fx * r1.width - ev.clientX;
+    }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => localStorage.setItem('pdfScale', String(viewer.currentScale)), 300);
+  }, { passive: false });
   $('#pageInput').onchange = (e) => { viewer.currentPageNumber = Math.max(1, Math.min(doc?.numPages || 1, +e.target.value)); };
   $('#showMarks').checked = localStorage.getItem('showAllMarks') === '1';
   $('#showMarks').onchange = (e) => { localStorage.setItem('showAllMarks', e.target.checked ? '1' : '0'); emit('marks-changed'); };
