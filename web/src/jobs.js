@@ -1,12 +1,14 @@
 // 侧栏顶部的逐段润色任务条
 import { api, $, h, guard } from './util.js';
 import { state } from './state.js';
+import { scopeFile } from './sidebar.js';
 
 const LABEL = { running: '进行中', paused: '已暂停', done: '已完成', cancelled: '已取消' };
 
 export function renderJobs() {
   const bar = $('#jobBar');
-  const list = state.jobs.filter((j) => j.status === 'running' || j.status === 'paused' || Date.now() - j.updatedAt < 6 * 3600_000);
+  const scope = scopeFile();
+  const list = state.jobs.filter((j) => (!scope || j.file === scope) && (j.status === 'running' || j.status === 'paused' || Date.now() - j.updatedAt < 6 * 3600_000));
   bar.replaceChildren(...list.map(jobRow));
 }
 
@@ -28,7 +30,7 @@ function jobRow(j) {
     h('div', { class: 'job-head' },
       h('b', {}, '逐段润色'),
       h('span', { class: 'tag skill' }, j.skill),
-      h('span', { class: 'job-label', title: j.file }, j.label),
+      h('span', { class: 'job-label', title: j.file }, j.label === j.file ? state.fileTitles[j.file] || j.label : j.label),
       h('span', { class: 'spacer' }),
       h('span', { class: 'muted' }, `${LABEL[j.status]} ${handled}/${j.total}`),
     ),

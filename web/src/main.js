@@ -116,6 +116,7 @@ function connect() {
 function applyState(s) {
   state.items = s.items;
   state.files = s.files;
+  state.fileTitles = s.fileTitles || {};
   state.agent = s.agent;
   state.compile = s.compile;
   state.dirty = s.dirty;
@@ -196,6 +197,8 @@ async function main() {
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') $('#modal').hidden = true; };
 
   on('select-item', selectItem);
+  on('file-opened', () => { renderSidebar(); renderJobs(); });
+  on('chapter-filter', () => renderJobs());
   on('marks-changed', () => { refreshMarks(); redrawAll(); });
   // Esc：取消选中，高亮全部撤掉
   document.addEventListener('keydown', (ev) => {

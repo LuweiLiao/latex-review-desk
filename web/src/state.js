@@ -2,6 +2,8 @@
 export const state = {
   items: [],
   files: [],
+  fileTitles: {},
+  openFile: null, // 左侧当前打开的文件
   skills: [],
   defaultSkill: '',
   favoriteSkills: [],

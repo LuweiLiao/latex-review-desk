@@ -238,3 +238,9 @@ details.why > div { margin: 4px 0 0 2px; }
 .save-status.err { color: #c62828; font-weight: 600; }
 .conflict-bar { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: #fdecec; color: #a82020; font-size: 13px; border-bottom: 1px solid #f3c5c5; }
 #editor .cm-content { caret-color: #222; }
+
+/* 按章筛选 */
+.side-scope { padding: 8px 10px 0; }
+.side-scope select { width: 100%; }
+.chapter-head { font-weight: 600; font-size: 13px; color: #333; margin: 14px 2px 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.chapter-head:first-child { margin-top: 2px; }

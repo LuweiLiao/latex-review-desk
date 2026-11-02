@@ -233,6 +233,8 @@ export async function openFile(path) {
   $('#fileSelect').value = path;
   refreshMarks();
   requestAnimationFrame(() => { view.scrollDOM.scrollTop = top; });
+  state.openFile = path;
+  emit('file-opened', path);
 }
 
 export function currentFile() { return current?.path; }

@@ -66,6 +66,7 @@ app.get('/api/state', (req, res) => {
     favoriteSkills: cfg.favoriteSkills,
     recipes: compiler.recipes(),
     files: files.list(),
+    fileTitles: files.titles(),
     items: review.list(),
     agent: review.agentStatus(),
     compile: compileView(),

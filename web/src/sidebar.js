@@ -12,6 +12,7 @@ export function initSidebar() {
   $('#sortOrder').value = localStorage.getItem('sortOrder') || 'pos';
   $('#statusFilter').onchange = (e) => { localStorage.setItem('statusFilter', e.target.value); renderSidebar(); };
   $('#sortOrder').onchange = (e) => { localStorage.setItem('sortOrder', e.target.value); renderSidebar(); };
+  $('#chapterFilter').onchange = (e) => { localStorage.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
   initResize();
 }
 
@@ -34,25 +35,65 @@ function initResize() {
   });
 }
 
+// 当前按章筛选到的文件；null 表示全部章节
+export function scopeFile() {
+  const v = localStorage.getItem('chapterFilter') || 'follow';
+  if (v === 'all') return null;
+  if (v === 'follow') return state.openFile;
+  return state.files.includes(v) ? v : state.openFile;
+}
+
+const chapterName = (f) => state.fileTitles[f] || f.replace(/^.*\//, '');
+
+function fillChapterFilter() {
+  const sel = $('#chapterFilter');
+  const v = localStorage.getItem('chapterFilter') || 'follow';
+  const proposed = (f) => state.items.filter((it) => it.status === 'proposed' && (!f || it.anchor.file === f)).length;
+  const open = (f) => state.items.filter((it) => OPEN.has(it.status) && it.anchor.file === f).length;
+  const label = (f) => { const p = proposed(f), o = open(f); return `${chapterName(f)}${p ? `（待确认 ${p}）` : o ? `（${o}）` : ''}`; };
+  const opts = [
+    new Option(state.openFile ? `跟随左侧：${label(state.openFile)}` : '跟随左侧当前章', 'follow'),
+    new Option(`全部章节${proposed() ? `（待确认 ${proposed()}）` : ''}`, 'all'),
+    ...state.files.filter((f) => state.items.some((it) => it.anchor.file === f) || /chapter/.test(f)).map((f) => new Option(label(f), f)),
+  ];
+  sel.replaceChildren(...opts);
+  sel.value = [...sel.options].some((o) => o.value === v) ? v : 'follow';
+}
+
 function visible() {
   const f = $('#statusFilter').value;
-  let list = state.items.filter((it) => f === 'all' || (f === 'open' ? OPEN.has(it.status) : it.status === f || (f === 'pending' && it.status === 'claimed')));
+  const scope = scopeFile();
+  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter((it) => f === 'all' || (f === 'open' ? OPEN.has(it.status) : it.status === f || (f === 'pending' && it.status === 'claimed')));
   if ($('#sortOrder').value === 'time') list = list.sort((a, b) => b.updatedAt - a.updatedAt);
   else list = list.sort(byPosition);
   return list;
 }
 
 export function renderSidebar() {
+  fillChapterFilter();
   const list = visible();
   const box = $('#itemList');
-  const n = state.items.filter((it) => it.status === 'proposed').length;
-  $('#sideTitle').textContent = n ? `注释 · ${n} 条待确认` : '注释';
+  const scope = scopeFile();
+  const n = state.items.filter((it) => it.status === 'proposed' && (!scope || it.anchor.file === scope)).length;
+  const total = state.items.filter((it) => it.status === 'proposed').length;
+  $('#sideTitle').textContent = n ? `注释 · ${n} 条待确认${scope && total > n ? `（全部 ${total}）` : ''}` : total ? `注释 · 其他章 ${total} 条待确认` : '注释';
   if (!list.length) {
-    box.replaceChildren(h('div', { class: 'empty' }, state.items.length ? '这个筛选下没有条目' : '在 PDF 或源码里选中文字，\n点“批注”或选一个 skill 润色。'));
+    const others = scope && state.items.some((it) => it.anchor.file !== scope && OPEN.has(it.status));
+    box.replaceChildren(h('div', { class: 'empty' }, !state.items.length ? '在 PDF 或源码里选中文字，\n点“批注”或选一个 skill 润色。' : others ? `${chapterName(scope)}没有符合筛选的注释。\n其他章节的可以在上方切到“全部章节”。` : '这个筛选下没有条目'));
     return;
   }
   const top = box.scrollTop;
-  box.replaceChildren(...list.map(card));
+  const nodes = [];
+  let last = null;
+  for (const it of list) {
+    // 全部章节、按位置排序时，每章前面加一个章名
+    if (!scope && $('#sortOrder').value === 'pos' && it.anchor.file !== last) {
+      last = it.anchor.file;
+      nodes.push(h('div', { class: 'chapter-head' }, chapterName(last)));
+    }
+    nodes.push(card(it));
+  }
+  box.replaceChildren(...nodes);
   box.scrollTop = top;
 }
 

@@ -43,6 +43,21 @@ export class TexFiles {
     return out.sort(fileOrder);
   }
 
+  // 文件 -> 显示用的章名。正文章节按出现顺序编号，没有 \chapter 的（摘要、master.tex）用文件名
+  titles() {
+    const out = {};
+    let n = 0;
+    for (const f of this.list()) {
+      let h = null;
+      try { h = headings(this.read(f).text).find((x) => x.kind === 'chapter'); } catch { /* 读不了就用文件名 */ }
+      const stem = f.split('/').pop().replace(/\.tex$/, '');
+      const base = { abstract_cn: '中文摘要', abstract_en: '英文摘要' }[stem] || stem;
+      if (h && !/backmatter|acknowledge|abstract|abbr/.test(f)) out[f] = `第${++n}章 ${h.title}`;
+      else out[f] = h ? h.title : base;
+    }
+    return out;
+  }
+
   read(rel) {
     const { rel: r, abs } = this.resolve(rel);
     const st = fs.statSync(abs);
@@ -151,7 +166,7 @@ export function nearest(offsets, target) {
 }
 
 // 所在的章节标题，形如 “第3章标题 · 3.2节标题”
-const HEADING = /\\(chapter|section|subsection|subsubsection)\*?\s*(?:\[[^\]]*\])?\s*\{/g;
+const HEADING = /\\(chapter|section|subsection|subsubsection)\*?\s*(?:\[([^\]]*)\])?\s*\{/g;
 const LEVEL = { chapter: 0, section: 1, subsection: 2, subsubsection: 3 };
 
 export function headings(text) {
@@ -163,7 +178,7 @@ export function headings(text) {
     const ls = text.lastIndexOf('\n', m.index) + 1;
     if (/(^|[^\\])%/.test(text.slice(ls, m.index))) continue;
     const title = readBraced(text, m.index + m[0].length - 1);
-    out.push({ level: LEVEL[m[1]], kind: m[1], offset: m.index, title: cleanTitle(title) });
+    out.push({ level: LEVEL[m[1]], kind: m[1], offset: m.index, title: cleanTitle(m[2] || title) });
   }
   return out;
 }
@@ -190,6 +205,7 @@ function readBraced(text, openIdx) {
 }
 
 function cleanTitle(t) {
+  t = t.replace(/\\(?:hskip|vskip)\s*[\d.]*\s*\\?[a-z]*(\{\})?/g, '').replace(/\\(?:hspace|vspace)\*?\{[^}]*\}/g, '');
   return t.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?/g, '').replace(/[{}$]/g, '').replace(/\s+/g, ' ').trim();
 }
 
