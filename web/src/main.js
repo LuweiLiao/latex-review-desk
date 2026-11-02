@@ -16,6 +16,13 @@ function setMode(mode) {
   if (mode === 'review') renderReview();
 }
 
+function renderChangesBtn() {
+  const ids = [...new Set(state.changes.map((c) => c.itemId))];
+  const btn = $('#confirmChangesBtn');
+  btn.hidden = !ids.length;
+  btn.querySelector('.count').textContent = ids.length || '';
+}
+
 function renderAgent() {
   const a = state.agent;
   const el = $('#agentStatus');
@@ -97,6 +104,7 @@ function connect() {
     renderItems();
   });
   es.addEventListener('jobs', (e) => { state.jobs = JSON.parse(e.data); renderJobs(); });
+  es.addEventListener('changes', (e) => { state.changes = JSON.parse(e.data); renderChangesBtn(); refreshMarks(); redrawAll(); });
   es.addEventListener('agent', (e) => { state.agent = JSON.parse(e.data); renderAgent(); });
   es.addEventListener('compile', (e) => { state.compile = JSON.parse(e.data); renderCompile(); });
   es.addEventListener('compile-progress', (e) => { $('#compileStatus').title = JSON.parse(e.data); });
@@ -129,6 +137,8 @@ function applyState(s) {
   state.defaultSkill = s.defaultSkill;
   state.favoriteSkills = s.favoriteSkills || [];
   state.jobs = s.jobs || [];
+  state.changes = s.changes || [];
+  renderChangesBtn();
   renderJobs();
   fillRecipes(s.recipes);
   const pdfChanged = s.pdf?.mtime !== state.pdf?.mtime;
@@ -208,6 +218,12 @@ async function main() {
     }
   });
   $('#stopBtn').onclick = guard(() => api('POST', '/api/compile/stop'));
+  $('#confirmChangesBtn').onclick = guard(async () => {
+    const n = new Set(state.changes.map((c) => c.itemId)).size;
+    if (!confirm(`确认这 ${n} 条已写入的修改？确认后去掉源码和 PDF 上的标黄（修改本身不变）。`)) return;
+    const r = await api('POST', '/api/changes/confirm', {});
+    toast(`已确认 ${r.confirmed} 条修改`);
+  });
   $('#recipeSelect').onchange = (e) => localStorage.setItem('recipe', e.target.value);
   $('#compileStatus').onclick = showCompileLog;
   $('#modal .modal-close').onclick = () => { $('#modal').hidden = true; };

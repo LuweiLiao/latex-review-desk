@@ -437,6 +437,7 @@ export class Review extends EventEmitter {
     });
     it.status = 'accepted';
     it.acceptedAt = Date.now();
+    it.confirmedAt = null;
     it.logId = log.id;
     it.updatedAt = Date.now();
     this.#changed();
@@ -498,6 +499,44 @@ export class Review extends EventEmitter {
     this.#changed();
     this.emit('files');
     return this.view(it);
+  }
+
+  // 已写入、还没“确认修改”的改动：网页在源码和 PDF 上标黄。
+  // 每处给出替换后文字在当前文件里的位置（文件被手动改过、找不到的就不标）
+  changes() {
+    const out = [];
+    for (const it of this.items) {
+      if (it.status !== 'accepted' || it.confirmedAt || !it.proposal) continue;
+      it.proposal.edits.forEach((e, idx) => {
+        if (e.skipped) return;
+        let text;
+        try { text = this.files.read(e.file).text; } catch { return; }
+        const at = e.replacement ? locateEdit(text, { original: e.replacement, offset: e.offset }, 'original') : -1;
+        if (e.replacement && at === -1) return;
+        const ls = lineStarts(text);
+        const pos = at === -1 ? Math.min(e.offset ?? 0, text.length) : at;
+        out.push({
+          id: `${it.id}:${idx}`, itemId: it.id, file: e.file,
+          from: pos, to: pos + e.replacement.length,
+          lineStart: offsetToLine(ls, pos), lineEnd: offsetToLine(ls, pos + e.replacement.length),
+          original: e.original, replacement: e.replacement,
+        });
+      });
+    }
+    return out;
+  }
+
+  // “确认修改”：去掉标黄。ids 不给就是全部
+  confirmChanges(ids) {
+    let n = 0;
+    for (const it of this.items) {
+      if (it.status !== 'accepted' || it.confirmedAt) continue;
+      if (ids && !ids.includes(it.id)) continue;
+      it.confirmedAt = Date.now();
+      n++;
+    }
+    if (n) this.#changed();
+    return { confirmed: n };
   }
 
   stats() {

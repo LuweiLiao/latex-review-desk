@@ -99,3 +99,23 @@ export function applyEdits(before, edits) {
   for (const e of [...edits].sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.replacement + out.slice(e.end);
   return out;
 }
+
+// replacement 里相对 original 新增或改写的区间（按 replacement 的下标），以及只删不补的位置
+export function changeSpans(original, replacement) {
+  const ins = [], del = [];
+  const ops = diffWords(original, replacement);
+  let off = 0;
+  for (let i = 0; i < ops.length; i++) {
+    const o = ops[i];
+    if (o.op === 'eq') { off += o.text.length; continue; }
+    if (o.op === 'del') {
+      if (ops[i + 1]?.op === 'ins') continue; // 改写：只标新文字
+      if (o.text.trim()) del.push({ at: off, text: o.text });
+      continue;
+    }
+    const prev = ops[i - 1];
+    if (o.text.trim()) ins.push({ from: off, to: off + o.text.length, old: prev?.op === 'del' ? prev.text : '' });
+    off += o.text.length;
+  }
+  return { ins, del };
+}

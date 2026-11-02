@@ -207,3 +207,28 @@ test('网页编辑器保存：版本对得上才写，被别处改过时报冲�
   assert.equal(r3.conflict, false);
   assert.ok(raw().includes('第二段正文'));
 });
+
+test('已接受的修改标黄，确认后去掉；撤销后也不再标', async () => {
+  const { review } = setup();
+  const text = SRC.replace(/\r\n/g, '\n');
+  const q = '第二段文字';
+  const from = text.indexOf(q);
+  const it = await review.create({ kind: 'polish', anchor: { source: 'source', file: 'content/ch3.tex', from, to: from + q.length, quote: q } });
+  review.claim();
+  review.submit(it.id, { edits: [{ original: '第二段文字，', replacement: '第二段正文，' }] });
+  assert.equal(review.changes().length, 0, '还没接受时不标');
+  review.accept(it.id);
+  const ch = review.changes();
+  assert.equal(ch.length, 1);
+  const now = review.files.read('content/ch3.tex').text;
+  assert.equal(now.slice(ch[0].from, ch[0].to), '第二段正文，');
+  assert.equal(ch[0].lineStart, 7);
+  assert.equal(review.confirmChanges().confirmed, 1);
+  assert.equal(review.changes().length, 0);
+  // 撤销再接受：又标出来
+  review.undo(it.id);
+  review.accept(it.id);
+  assert.equal(review.changes().length, 1);
+  review.undo(it.id);
+  assert.equal(review.changes().length, 0);
+});

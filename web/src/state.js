@@ -8,6 +8,7 @@ export const state = {
   defaultSkill: '',
   favoriteSkills: [],
   jobs: [],
+  changes: [], // 已写入、还没确认的修改
   agent: { state: 'offline' },
   compile: {},
   pdf: null,

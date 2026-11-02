@@ -1,6 +1,7 @@
 // 左侧源码编辑器：可以直接改，停手 1 秒自动保存（Ctrl+S 立即保存）
 import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
+import { changeSpans } from '../lib/diff.js';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { StreamLanguage, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
@@ -10,6 +11,31 @@ import { state, emit, markedItems } from './state.js';
 
 const setMarks = StateEffect.define();
 const setFlash = StateEffect.define();
+const setChanges = StateEffect.define();
+
+// 已写入、还没确认的修改：改了的字标黄
+const changesField = StateField.define({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) if (e.is(setChanges)) deco = e.value;
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// 只删不补的地方放一个小黄点，悬停看删了什么
+class DelMark extends WidgetType {
+  constructor(text, id) { super(); this.text = text; this.id = id; }
+  eq(o) { return o.text === this.text && o.id === this.id; }
+  toDOM() {
+    const el = document.createElement('span');
+    el.className = 'cm-chg-del';
+    el.title = `删去：${this.text}`;
+    el.dataset.id = this.id;
+    return el;
+  }
+}
 
 const marksField = StateField.define({
   create: () => Decoration.none,
@@ -217,6 +243,7 @@ function makeState(doc) {
       trackEdits,
       trackCursor,
       marksField,
+      changesField,
       flashField,
       clickHandlers,
     ],
@@ -292,6 +319,30 @@ function rangeOf(it) {
   return best === -1 ? null : [best, best + q.length];
 }
 
+function changeDecos() {
+  const text = view.state.doc.toString();
+  const out = [];
+  for (const c of state.changes || []) {
+    if (c.file !== current?.path) continue;
+    let base = c.from;
+    if (text.slice(base, base + c.replacement.length) !== c.replacement) {
+      if (!c.replacement) continue;
+      // 之后前文又改过，位置挪了：找离原位置最近的同样文字
+      let best = -1, bd = Infinity;
+      for (let i = text.indexOf(c.replacement); i !== -1; i = text.indexOf(c.replacement, i + 1)) {
+        const d = Math.abs(i - c.from);
+        if (d < bd) { bd = d; best = i; }
+      }
+      if (best === -1) continue;
+      base = best;
+    }
+    const { ins, del } = changeSpans(c.original, c.replacement);
+    for (const s of ins) out.push(Decoration.mark({ class: 'cm-chg', attributes: { 'data-id': c.itemId, title: s.old ? `原文：${s.old}` : '新增' } }).range(base + s.from, base + s.to));
+    for (const d of del) out.push(Decoration.widget({ widget: new DelMark(d.text, c.itemId), side: 1 }).range(Math.min(base + d.at, text.length)));
+  }
+  return Decoration.set(out, true);
+}
+
 export function refreshMarks() {
   if (!current) return;
   const ranges = [];
@@ -303,7 +354,7 @@ export function refreshMarks() {
     ranges.push(Decoration.mark({ class: cls, attributes: { 'data-id': it.id, title: it.comment || `润色：${it.skill}` } }).range(r[0], r[1]));
   }
   ranges.sort((a, b) => a.from - b.from);
-  view.dispatch({ effects: setMarks.of(Decoration.set(ranges, true)) });
+  view.dispatch({ effects: [setMarks.of(Decoration.set(ranges, true)), setChanges.of(changeDecos())] });
 }
 
 export async function revealItem(it) {

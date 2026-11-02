@@ -3,6 +3,7 @@ import './pdfjs-global.js';
 import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import { api, $, OPEN } from './util.js';
 import { KEEP, findSpan, projectSource } from '../lib/text.js';
+import { changeSpans } from '../lib/diff.js';
 import { state, emit, markedItems } from './state.js';
 
 const pdfjsLib = globalThis.pdfjsLib;
@@ -123,6 +124,7 @@ export async function loadPdf() {
   if (loadingTask !== task) { task.destroy(); return; } // 又来了更新的版本
   doc = newDoc;
   boxCache.clear();
+  changeCache.clear();
   viewer.setDocument(doc);
   linkService.setDocument(doc);
   $('#pageCount').textContent = doc.numPages;
@@ -288,9 +290,21 @@ function mergeLines(rects) {
 }
 
 // 估页码：取若干行的 synctex 结果的中位数；单行返回的框太多（整页兜底）就不信它
+let running = 0;
+const waiting = [];
+function limited(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      running++;
+      fn().then(resolve, reject).finally(() => { running--; waiting.shift()?.(); });
+    };
+    running < 4 ? run() : waiting.push(run);
+  });
+}
+
 async function guessPage(file, lines, fallback) {
   const pages = [];
-  const all = await Promise.all(lines.map((l) => api('GET', `/api/synctex/forward?file=${encodeURIComponent(file)}&line=${l}`).catch(() => [])));
+  const all = await Promise.all(lines.map((l) => limited(() => api('GET', `/api/synctex/forward?file=${encodeURIComponent(file)}&line=${l}`)).catch(() => [])));
   for (const bs of all) {
     if (!bs.length || bs.length > 12) continue;
     pages.push(...bs.filter((b) => b.W > 0 && b.H > 0).map((b) => b.page));
@@ -302,11 +316,17 @@ async function guessPage(file, lines, fallback) {
 
 // 在 page-1 .. page+2 的文字里找 needle（源码片段），返回矩形
 async function locate(file, lines, sourceSnippet, fallbackPage) {
-  if (!doc) return [];
+  const s = await locateSpan(file, lines, sourceSnippet, fallbackPage);
+  return s ? spanRects(s.map, s.r[0], s.r[1]) : [];
+}
+
+// 返回 { map, r: [起, 止], exact }；exact 时投影串第 k 个字对应 PDF 上第 r[0]+k 个字
+async function locateSpan(file, lines, sourceSnippet, fallbackPage) {
+  if (!doc) return null;
   const needleFull = projectSource(sourceSnippet).chars;
-  if (needleFull.length < 2) return [];
+  if (needleFull.length < 2) return null;
   const center = await guessPage(file, lines, fallbackPage);
-  if (!center) return [];
+  if (!center) return null;
   const pages = [];
   for (let n = Math.max(1, center - 1); n <= Math.min(doc.numPages, center + 2); n++) pages.push(n);
   const parts = await Promise.all(pages.map(pageText));
@@ -317,10 +337,31 @@ async function locate(file, lines, sourceSnippet, fallbackPage) {
   if (needleFull.length > 400) {
     const h = findSpan(chars, needleFull.slice(0, 120));
     const t = h && findSpan(chars.slice(h[1]), needleFull.slice(-120));
-    r = h && t ? [h[0], h[1] + t[1]] : h;
+    r = h && t ? [h[0], h[1] + t[1], false] : h && [h[0], h[1], false];
   } else r = findSpan(chars, needleFull);
-  if (!r) return [];
-  return spanRects(map, r[0], r[1]);
+  if (!r) return null;
+  return { map, r, exact: !!r[2] };
+}
+
+// 一处已写入修改在 PDF 上的框：只框新增 / 改写的字；对不上逐字时框整句
+const changeCache = new Map();
+function changeRects(c) {
+  const key = `${c.id}:${c.from}:${c.replacement.length}:${state.pdf?.mtime}`;
+  if (!changeCache.has(key)) changeCache.set(key, (async () => {
+    if (!c.replacement.trim()) return [];
+    const s = await locateSpan(c.file, [...new Set([c.lineStart, c.lineEnd])], c.replacement, null);
+    if (!s) return [];
+    if (!s.exact) return spanRects(s.map, s.r[0], s.r[1]);
+    const proj = projectSource(c.replacement);
+    const out = [];
+    for (const span of changeSpans(c.original, c.replacement).ins) {
+      let k0 = -1, k1 = -1;
+      proj.map.forEach((off, k) => { if (off >= span.from && off < span.to) { if (k0 < 0) k0 = k; k1 = k; } });
+      if (k0 >= 0) out.push(...spanRects(s.map, s.r[0] + k0, s.r[0] + k1 + 1));
+    }
+    return out;
+  })().catch(() => []));
+  return changeCache.get(key);
 }
 
 function linesOf(it) {
@@ -356,12 +397,18 @@ async function drawPage(n) {
   const gen = (drawGen.get(n) || 0) + 1;
   drawGen.set(n, gen);
   const near = items.filter((it) => !it.anchor.page || Math.abs(it.anchor.page - n) <= 3);
-  const boxes = await Promise.all(near.map((it) => boxesFor(it)));
+  const [boxes, chg] = await Promise.all([Promise.all(near.map((it) => boxesFor(it))), Promise.all((state.changes || []).map(changeRects))]);
   if (drawGen.get(n) !== gen) return;
   const parts = [];
+  (state.changes || []).forEach((c, i) => { for (const r of chg[i]) if (r.page === n) parts.push({ chg: c, r }); });
   near.forEach((it, i) => { for (const r of boxes[i]) if (r.page === n) parts.push({ it, r }); });
-  layer.replaceChildren(...parts.map(({ it, r }) => {
+  layer.replaceChildren(...parts.map(({ it, chg: c, r }) => {
     const d = document.createElement('div');
+    if (c) {
+      d.className = 'hl chg';
+      Object.assign(d.style, { left: `${r.fx * 100}%`, top: `${r.fy * 100}%`, width: `${r.fw * 100}%`, height: `${r.fh * 100}%` });
+      return d;
+    }
     d.className = it.id === state.activeId ? `hl active st-${it.status}` : `hl other`;
     Object.assign(d.style, { left: `${r.fx * 100}%`, top: `${r.fy * 100}%`, width: `${r.fw * 100}%`, height: `${r.fh * 100}%` });
     return d;

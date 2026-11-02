@@ -73,6 +73,7 @@ app.get('/api/state', (req, res) => {
     pdf: pdfInfo(),
     dirty: dirtyFiles(),
     jobs: jobs.views(),
+    changes: review.changes(),
   });
 });
 
@@ -128,6 +129,8 @@ app.post('/api/items/:id/requeue', (req, res) => res.json(review.requeue(req.par
 app.post('/api/items/:id/note', (req, res) => res.json(review.note(req.params.id, req.body?.message || '')));
 app.post('/api/items/:id/accept', (req, res) => res.json(review.accept(req.params.id, req.body || {})));
 app.post('/api/items/:id/reject', (req, res) => res.json(review.reject(req.params.id, req.body?.reason || '')));
+app.get('/api/changes', (req, res) => res.json(review.changes()));
+app.post('/api/changes/confirm', (req, res) => res.json(review.confirmChanges(Array.isArray(req.body?.ids) ? req.body.ids : null)));
 app.post('/api/items/:id/restore', (req, res) => res.json(review.restore(req.params.id)));
 app.post('/api/items/:id/undo', (req, res) => res.json(review.undo(req.params.id)));
 
@@ -160,7 +163,7 @@ function broadcast(event, data) {
 setInterval(() => { for (const c of clients) c.write(': ping\n\n'); broadcast('agent', review.agentStatus()); }, 25_000).unref();
 
 let itemsTimer = null;
-const pushItems = () => { clearTimeout(itemsTimer); itemsTimer = setTimeout(() => broadcast('items', review.list()), 50); };
+const pushItems = () => { clearTimeout(itemsTimer); itemsTimer = setTimeout(() => { broadcast('items', review.list()); broadcast('changes', review.changes()); }, 50); };
 review.on('changed', pushItems);
 let jobsTimer = null;
 const pushJobs = () => { clearTimeout(jobsTimer); jobsTimer = setTimeout(() => broadcast('jobs', jobs.views()), 80); };

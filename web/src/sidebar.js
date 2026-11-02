@@ -234,6 +234,7 @@ function actions(it) {
       b('重做', () => replyBox(it)),
       b('大图对照', () => emit('open-review', it.id), 'btn small link'));
   }
+  if (it.status === 'accepted' && !it.confirmedAt) out.push(b('确认', () => api('POST', '/api/changes/confirm', { ids: [it.id] }), 'btn small chg-small'));
   if (it.status === 'accepted') out.push(b('撤销写入', async () => { if (confirm('把这条修改从论文里撤销？')) { await api('POST', `/api/items/${it.id}/undo`); toast('已撤销'); } }));
   if (it.status === 'replied') out.push(b('回复', () => replyBox(it)), b('关闭', () => api('POST', `/api/items/${it.id}/reject`, {})));
   if (it.status === 'rejected' && it.proposal) out.push(b('恢复方案', async () => { await api('POST', `/api/items/${it.id}/restore`); toast(`${it.id} 已恢复为待确认`); }, 'btn small primary'));
