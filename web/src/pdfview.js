@@ -420,8 +420,30 @@ async function boxesFor(it) {
   // 选区矩形只在同一版 PDF 上有效，编译后重新按文字找
   if (it.anchor.rects?.length && it.anchor.pdfMtime && state.pdf && Math.abs(it.anchor.pdfMtime - state.pdf.mtime) < 1) return it.anchor.rects;
   const key = `${it.id}:${it.anchor.file}:${it.anchor.lineStart}:${it.anchor.quote.length}:${state.pdf?.mtime}`;
-  if (!boxCache.has(key)) boxCache.set(key, locate(it.anchor.file, linesOf(it), it.anchor.quote, it.anchor.page).catch(() => []));
+  if (!boxCache.has(key)) boxCache.set(key, (it.kind === 'formula' ? formulaRects(it) : locate(it.anchor.file, linesOf(it), it.anchor.quote, it.anchor.page)).catch(() => []));
   return boxCache.get(key);
+}
+
+// 公式审核的条目：用 synctex 找到页和高度，取那里的独立公式框（公式文字和源码对不上，不能按文字找）
+async function formulaRects(it) {
+  const { lineStart: a, lineEnd: b } = it.anchor;
+  const lines = [...new Set([Math.min(b, a + 1), Math.round((a + b) / 2), Math.max(a, b - 1)])];
+  const all = await Promise.all(lines.map((l) => limited(() => api('GET', `/api/synctex/forward?file=${encodeURIComponent(it.anchor.file)}&line=${l}`)).catch(() => [])));
+  const hits = all.filter((bs) => bs.length && bs.length <= 12).flat().filter((x) => x.W > 0 && x.H > 0);
+  if (!hits.length) return [];
+  const page = hits.map((x) => x.page).sort((m, n) => m - n)[hits.length >> 1];
+  const pdfPage = await doc.getPage(page);
+  const ys = hits.filter((x) => x.page === page).map((x) => boxToFrac({ pdfPage }, x));
+  const top = Math.min(...ys.map((r) => r.fy)), bot = Math.max(...ys.map((r) => r.fy + r.fh));
+  const boxes = (await formulasOf(page)).filter((f) => f.kind === 'display');
+  let best = null, bestScore = -Infinity;
+  for (const f of boxes) {
+    const overlap = Math.min(bot, f.fy + f.fh) - Math.max(top, f.fy);
+    const score = overlap > 0 ? overlap : -Math.abs((f.fy + f.fh / 2) - (top + bot) / 2);
+    if (score > bestScore) { best = f; bestScore = score; }
+  }
+  if (!best || bestScore < -0.05) return ys.map((r) => ({ ...r, page }));
+  return [{ page, fx: best.fx, fy: best.fy, fw: best.fw, fh: best.fh }];
 }
 
 function hlLayer(pv) {
@@ -580,7 +602,7 @@ async function drawPage(n) {
   });
   near.forEach((it, i) => {
     for (const r of boxes[i]) if (r.page === n) parts.push({ it, r });
-    for (const r of withFormulas(boxes[i], formulas, n)) parts.push({ it, r });
+    if (it.kind !== 'formula') for (const r of withFormulas(boxes[i], formulas, n)) parts.push({ it, r });
   });
   layer.replaceChildren(...parts.map(({ it, chg: c, r }) => {
     const d = document.createElement('div');

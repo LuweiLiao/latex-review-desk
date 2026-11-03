@@ -18,6 +18,7 @@
     "synctex"
   ],
   "skills": [
-    "./skills/thesis-review-agent"
+    "./skills/thesis-review-agent",
+    "./skills/thesis-formula-review"
   ]
 }

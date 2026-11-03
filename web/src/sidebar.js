@@ -1,5 +1,5 @@
 // 右侧批注列表：待确认的方案直接在卡片里显示修订对照，可就地接受、驳回、重做
-import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN } from './util.js';
+import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN, VERDICT } from './util.js';
 import { state, emit, on } from './state.js';
 import { diffWords } from '../lib/diff.js';
 import { itemAnchor, pageOffset, pdfReady } from './pdfview.js';
@@ -69,8 +69,13 @@ function fillChapterFilter() {
 function visible() {
   const f = $('#statusFilter').value;
   const scope = scopeFile();
-  const unfinished = (it) => ['pending', 'claimed', 'proposed'].includes(it.status) || (it.status === 'replied' && !it.job);
-  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter((it) => (f === 'open' ? unfinished(it) : it.status === f || (f === 'pending' && it.status === 'claimed')));
+  const unfinished = (it) => ['pending', 'claimed', 'proposed'].includes(it.status) || (it.status === 'replied' && (it.kind === 'formula' ? it.verdict !== 'pass' : !it.job));
+  const match = (it) => {
+    if (f === 'open') return unfinished(it);
+    if (f === 'formula') return it.kind === 'formula' && it.status !== 'rejected';
+    return it.status === f || (f === 'pending' && it.status === 'claimed');
+  };
+  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter(match);
   if ($('#sortOrder').value === 'time') list = list.sort((a, b) => b.updatedAt - a.updatedAt);
   else list = list.sort(byPosition);
   return list;
@@ -115,7 +120,9 @@ function card(it, inRail = false) {
     it.conflict && !it.stale && h('span', { class: 'tag stale' }, '方案冲突'),
     it.anchor.approximate && h('span', { class: 'tag approx', title: 'PDF 选区没能逐字对上源码，引用的是附近的源码' }, '近似'),
     it.kind === 'polish' && h('span', { class: 'tag skill' }, it.skill),
-    it.job && h('span', { class: 'tag job-tag', title: `逐段润色 ${it.job.id}` }, `第 ${it.job.index}/${it.job.total} 段`),
+    it.kind === 'formula' && h('span', { class: 'tag formula-tag' }, '公式审核'),
+    it.kind === 'formula' && it.verdict && h('span', { class: `tag verdict-${it.verdict}` }, VERDICT[it.verdict]),
+    it.job && h('span', { class: 'tag job-tag', title: `${it.kind === 'formula' ? '公式审核' : '逐段润色'} ${it.job.id}` }, `第 ${it.job.index}/${it.job.total} ${it.kind === 'formula' ? '个' : '段'}`),
     duplicatesOf(it).length > 0 && h('span', { class: 'tag stale', title: '同一段落还有其他未完成的请求，保留一条即可' }, `与 ${duplicatesOf(it).join('、')} 重复`),
     h('span', {}, [it.anchor.page ? `第 ${it.anchor.page} 页` : '', it.anchor.section].filter(Boolean).join(' · ')),
   );
@@ -140,7 +147,7 @@ function card(it, inRail = false) {
   },
     head,
     // 有方案时修订对照里已经包含原文，不再重复显示引用
-    !hasProposal && h('div', { class: 'quote' }, it.anchor.pdfText || it.anchor.quote),
+    !hasProposal && h('div', { class: `quote${it.kind === 'formula' ? ' tex' : ''}` }, it.anchor.pdfText || it.anchor.quote),
     it.comment && h('div', { class: 'comment' }, h('span', { class: 'who' }, '意见：'), it.comment),
     hasProposal && diffSlot(it),
     hasProposal && notes(it),

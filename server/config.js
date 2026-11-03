@@ -20,6 +20,7 @@ export function loadConfig(file = process.env.THESIS_REVIEW_CONFIG) {
     extraSources: [],
     skillDirs: ['~/.claude/skills'],
     defaultSkill: '',
+    formulaSkill: 'thesis-formula-review', // 公式审核用的 skill，找不到就只按请求里的说明审
     claimTimeoutMin: 30,
     waitTimeoutSec: 240,
     dataDir: path.join(APP_ROOT, 'data'),

@@ -192,6 +192,11 @@ export function initSource() {
     const head = view.state.selection.main.head;
     emit('sync-to-pdf', { file: current.path, line: view.state.doc.lineAt(head).number, snippet: snippetAt(view, head) });
   });
+  $('#formulaReviewBtn').addEventListener('click', () => {
+    if (!current) return;
+    const r = $('#formulaReviewBtn').getBoundingClientRect();
+    emit('selection', { x: r.left, y: r.bottom + 6, quote: `整章：${current.path}`, formulaReview: true, anchor: { source: 'source', file: current.path, whole: true } });
+  });
   $('#polishChapterBtn').addEventListener('click', () => {
     if (!current) return;
     const r = $('#polishChapterBtn').getBoundingClientRect();

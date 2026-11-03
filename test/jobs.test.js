@@ -138,3 +138,37 @@ test('逐段任务：某段已有未完成的请求时沿用它，不重复建',
   assert.equal(jobs.views()[0].counts.claimed, 1, '沿用的请求计入任务进度');
   assert.equal(j.total, 4);
 });
+
+test('公式审核：一个独立公式一条请求，只有公式 agent 领得到，回复要带结论', async () => {
+  const { review, jobs } = setup();
+  const p = await jobs.preview({ type: 'formula', anchor: { source: 'source', file: 'content/a.tex', whole: true } });
+  assert.equal(p.count, 2, 'equation 和 \[..\] 两个');
+  const j = await jobs.createFormula({ anchor: { source: 'source', file: 'content/a.tex', whole: true } });
+  assert.equal(j.type, 'formula');
+  assert.equal(review.items.length, 1);
+  assert.equal(review.items[0].kind, 'formula');
+  assert.ok(review.items[0].anchor.quote.startsWith('\\begin{equation}') && review.items[0].anchor.quote.endsWith('\\end{equation}'));
+
+  // 批注 / 润色 agent 默认领不到公式审核
+  assert.equal(review.claim(3).length, 0);
+  const [f1] = review.claim(3, ['formula']);
+  assert.match(f1.instructions, /公式审核/);
+  assert.match(f1.instructions, /第 1\/2 个公式/);
+  assert.throws(() => review.reply(f1.id, '没问题'), /verdict/);
+  review.reply(f1.id, '符号均已定义', 'pass');
+  await settle(jobs);
+  assert.equal(review.items.length, 2, '审完一个放下一个');
+
+  const [f2] = review.claim(3, ['formula']);
+  review.submit(f2.id, { edits: [{ original: '\\[ a = b \\]', replacement: '\\[ a = b . \\]' }], rationale: '公式末尾缺标点' });
+  await settle(jobs);
+  const v = jobs.view(jobs.find(j.id));
+  assert.equal(v.status, 'done');
+  assert.deepEqual([v.counts.pass, v.counts.issue], [1, 1]);
+  assert.equal(review.find(f2.id).verdict, 'issue');
+
+  // 两类 agent 的在线状态分开记
+  const st = review.agentStatus();
+  assert.ok(st.formula.lastSeen > 0);
+  assert.equal(st.lastSeen, 0, '批注 agent 没来过');
+});

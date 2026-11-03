@@ -8,6 +8,10 @@ import { findAll, lineStarts, lineToOffset, nearest, offsetToLine, paragraphRang
 import { getSkill } from './skills.js';
 
 const OPEN = new Set(['pending', 'claimed', 'proposed', 'replied']);
+export const KINDS = ['comment', 'polish', 'formula'];
+// 两类后台 agent：review 处理批注和润色，formula 只做公式审核
+const ROLE_KINDS = { review: ['comment', 'polish'], formula: ['formula'] };
+const roleOf = (kinds) => (kinds?.length === 1 && kinds[0] === 'formula' ? 'formula' : 'review');
 
 export class Review extends EventEmitter {
   constructor(cfg, files, store) {
@@ -16,7 +20,7 @@ export class Review extends EventEmitter {
     this.cfg = cfg;
     this.files = files;
     this.store = store;
-    this.agent = { lastSeen: 0, waiting: 0 };
+    this.agents = { review: { lastSeen: 0, waiting: 0 }, formula: { lastSeen: 0, waiting: 0 } };
     this.timer = setInterval(() => this.releaseExpired(), 60_000);
     this.timer.unref();
   }
@@ -58,8 +62,9 @@ export class Review extends EventEmitter {
   // ---- 新建请求 ----
 
   async create({ kind, comment = '', skill = '', anchor, job = null }) {
-    if (!['comment', 'polish'].includes(kind)) throw new Error('kind 只能是 comment 或 polish');
+    if (!KINDS.includes(kind)) throw new Error('kind 只能是 comment、polish 或 formula');
     if (kind === 'polish' && !skill) skill = this.cfg.defaultSkill;
+    if (kind === 'formula' && !skill && this.cfg.formulaSkill && getSkill(this.cfg, this.cfg.formulaSkill)) skill = this.cfg.formulaSkill;
     if (kind === 'comment' && !comment.trim()) throw new Error('批注内容不能为空');
     if (skill && !getSkill(this.cfg, skill)) throw new Error(`没有找到 skill：${skill}`);
     const a = await this.resolveAnchor(anchor || {});
@@ -185,6 +190,7 @@ export class Review extends EventEmitter {
       if (it.kind === 'comment') it.kind = 'polish';
     }
     it.requeuedAt = Date.now();
+    delete it.verdict;
     if (message.trim()) it.thread.push({ role: 'user', text: message.trim(), at: it.requeuedAt });
     if (it.proposal) {
       it.history.push({ proposal: it.proposal, verdict: 'redo', feedback: message.trim(), at: Date.now() });
@@ -198,9 +204,9 @@ export class Review extends EventEmitter {
 
   // ---- agent 侧 ----
 
-  claim(max = 3) {
+  claim(max = 3, kinds = ROLE_KINDS.review) {
     const picked = this.items
-      .filter((x) => x.status === 'pending')
+      .filter((x) => x.status === 'pending' && kinds.includes(x.kind))
       .sort((a, b) => a.updatedAt - b.updatedAt)
       .slice(0, max);
     for (const it of picked) { it.status = 'claimed'; it.claimedAt = Date.now(); it.updatedAt = Date.now(); }
@@ -214,7 +220,9 @@ export class Review extends EventEmitter {
     const lines = text.split('\n');
     const ls0 = loc?.lineStart ?? it.anchor.lineStart;
     const le0 = loc?.lineEnd ?? it.anchor.lineEnd;
-    const from = Math.max(1, ls0 - 15), to = Math.min(lines.length, le0 + 15);
+    // 公式审核要看推导从哪来，往前多给些
+    const before = it.kind === 'formula' ? 40 : 15;
+    const from = Math.max(1, ls0 - before), to = Math.min(lines.length, le0 + 15);
     const context = lines.slice(from - 1, to).map((l, i) => `${String(from + i).padStart(5)}| ${l}`).join('\n');
     let paragraph = '';
     if (loc) { const [ps, pe] = paragraphRange(text, loc.start, loc.end); paragraph = text.slice(ps, pe); }
@@ -225,7 +233,7 @@ export class Review extends EventEmitter {
       comment: it.comment,
       skill: skill ? { name: skill.name, path: skill.path, description: skill.description } : null,
       job: it.job,
-      instructions: (it.job ? `这是逐段润色任务 ${it.job.id}（${it.job.label}）的第 ${it.job.index}/${it.job.total} 段：只改 quote 这一段，不要改动或合并前后段落；前后段会作为单独的请求陆续发来。这一段已经写得好、按 skill 规则没有要改的，就用 reply 说明“无需修改”，不要硬改。` : '') + (skill
+      instructions: it.kind === 'formula' ? formulaInstructions(it, skill) : (it.job ? `这是逐段润色任务 ${it.job.id}（${it.job.label}）的第 ${it.job.index}/${it.job.total} 段：只改 quote 这一段，不要改动或合并前后段落；前后段会作为单独的请求陆续发来。这一段已经写得好、按 skill 规则没有要改的，就用 reply 说明“无需修改”，不要硬改。` : '') + (skill
         ? `用户指定用 skill「${skill.name}」处理：先调用 get_skill("${skill.name}") 读取全文，严格按它的规则改写 quote；comment 是附加要求，优先于 skill 默认做法。rationale 里写明按该 skill 的哪些规则改了什么。`
         : '批注请求：判断是要求修改还是提问，修改就 submit_proposal，提问或无需修改就 reply。'),
       file: it.anchor.file,
@@ -240,6 +248,7 @@ export class Review extends EventEmitter {
       paragraph,
       context,
       thread: it.thread,
+      ...(it.kind === 'formula' ? { formula: it.formula || null } : {}),
       previousProposals: it.history.map((h) => ({
         verdict: h.verdict,
         feedback: h.feedback || h.reason || '',
@@ -248,47 +257,54 @@ export class Review extends EventEmitter {
     };
   }
 
-  async wait({ max = 3, timeoutMs = 240_000, signal, onTick } = {}) {
-    this.agent.waiting++;
-    this.#touch();
+  async wait({ max = 3, timeoutMs = 240_000, signal, onTick, kinds = ROLE_KINDS.review } = {}) {
+    const role = roleOf(kinds);
+    this.agents[role].waiting++;
+    this.#touch(role);
     const deadline = Date.now() + timeoutMs;
     try {
       while (true) {
-        const got = this.claim(max);
+        const got = this.claim(max, kinds);
         if (got.length) return got;
         const left = deadline - Date.now();
         if (left <= 0 || signal?.aborted) return [];
         await new Promise((resolve) => {
           const done = () => { clearTimeout(t); clearInterval(tick); this.off('pending', done); signal?.removeEventListener('abort', done); resolve(); };
           const t = setTimeout(done, left);
-          const tick = setInterval(() => { this.#touch(); onTick?.(); }, 20_000);
+          const tick = setInterval(() => { this.#touch(role); onTick?.(); }, 20_000);
           this.on('pending', done);
           signal?.addEventListener('abort', done);
         });
       }
     } finally {
-      this.agent.waiting--;
-      this.#touch();
+      this.agents[role].waiting--;
+      this.#touch(role);
     }
   }
 
-  #touch() {
-    this.agent.lastSeen = Date.now();
+  #touch(role = 'review') {
+    this.agents[role].lastSeen = Date.now();
     this.emit('agent', this.agentStatus());
   }
 
-  agentStatus() {
-    const age = Date.now() - this.agent.lastSeen;
-    const busy = this.items.filter((x) => x.status === 'claimed').length;
+  #roleStatus(role) {
+    const a = this.agents[role];
+    const age = Date.now() - a.lastSeen;
+    const busy = this.items.filter((x) => x.status === 'claimed' && ROLE_KINDS[role].includes(x.kind)).length;
     let state = 'offline';
-    if (this.agent.waiting > 0) state = 'waiting';
+    if (a.waiting > 0) state = 'waiting';
     else if (age < 10 * 60_000 && (busy || age < 90_000)) state = 'busy';
-    return { state, lastSeen: this.agent.lastSeen, busy };
+    return { state, lastSeen: a.lastSeen, busy };
   }
 
-  submit(id, { edits, rationale = '', fidelity = '', summary = '' }) {
-    this.#touch();
+  // 顶层字段是批注 / 润色 agent（兼容旧网页），formula 是公式审核 agent
+  agentStatus() {
+    return { ...this.#roleStatus('review'), formula: this.#roleStatus('formula') };
+  }
+
+  submit(id, { edits, rationale = '', fidelity = '', summary = '', verdict }) {
     const it = this.find(id);
+    this.#touch(it.kind === 'formula' ? 'formula' : 'review');
     if (!OPEN.has(it.status)) throw new Error(`${id} 当前状态是 ${it.status}，不能再提交方案`);
     if (!Array.isArray(edits) || !edits.length) throw new Error('edits 不能为空；不需要改文字时请用 reply');
     const anchorText = this.files.read(it.anchor.file).text;
@@ -311,16 +327,22 @@ export class Review extends EventEmitter {
     });
     checkOverlap(resolved);
     it.proposal = { edits: resolved, rationale: String(rationale), fidelity: String(fidelity), summary: String(summary), createdAt: Date.now() };
+    if (it.kind === 'formula') it.verdict = 'issue'; // 给了改法就是有问题
+    else if (verdict) it.verdict = verdict;
     it.status = 'proposed';
     it.updatedAt = Date.now();
     this.#changed();
     return { id, status: it.status, edits: resolved.length };
   }
 
-  reply(id, message) {
-    this.#touch();
+  reply(id, message, verdict) {
     const it = this.find(id);
+    this.#touch(it.kind === 'formula' ? 'formula' : 'review');
     if (!message?.trim()) throw new Error('回复内容为空');
+    if (it.kind === 'formula') {
+      if (!['pass', 'issue', 'unsure'].includes(verdict)) throw new Error('公式审核的回复要带 verdict：pass 通过 / issue 有问题 / unsure 拿不准');
+      it.verdict = verdict;
+    }
     it.thread.push({ role: 'agent', text: message.trim(), at: Date.now() });
     if (it.status === 'claimed' || it.status === 'pending') it.status = 'replied';
     it.updatedAt = Date.now();
@@ -553,6 +575,14 @@ function locateEdit(text, e, field) {
   const occ = findAll(text, s);
   if (!occ.length) return -1;
   return occ.length === 1 ? occ[0] : nearest(occ, e.offset ?? 0);
+}
+
+function formulaInstructions(it, skill) {
+  const pos = it.job ? `这是公式审核任务 ${it.job.id}（${it.job.label}）的第 ${it.job.index}/${it.job.total} 个公式，按顺序发来，前面的公式你可能已经审过。` : '';
+  const how = skill ? `先调用 get_skill("${skill.name}") 读取审核规则（第一次读，之后复用）。` : '';
+  return `公式审核：${pos}${how}只审 quote 这一个公式（必要时结合 context 里前文的定义和推导），检查符号定义与一致性、维数、上下标与字体、和前文推导是否衔接、编号与引用。` +
+    '结论三选一：没问题 → reply(id, 一句话说明, verdict="pass")；有问题且能给出确定的改法 → submit_proposal（只改这个公式或它紧邻的定义句，rationale 写清是哪一项检查发现的问题）；' +
+    '有问题但需要作者判断、或拿不准 → reply(id, 写清问题和建议, verdict="issue" 或 "unsure")。不要为了改而改，排版风格类的小差异不算问题。';
 }
 
 function checkOverlap(edits) {

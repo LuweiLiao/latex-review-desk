@@ -32,6 +32,14 @@ function renderAgent() {
   el.textContent = label;
   el.className = `pill ${a.state}`;
   el.title = a.lastSeen ? `最近一次联系：${new Date(a.lastSeen).toLocaleTimeString()}` : '还没有 agent 连接过。在 Claude Code 里运行 /thesis-review-agent';
+  // 公式审核 agent：连过才显示
+  const f = a.formula, fe = $('#formulaAgentStatus');
+  fe.hidden = !f?.lastSeen && !state.jobs?.some((j) => j.type === 'formula' && j.status === 'running');
+  if (f) {
+    fe.textContent = { waiting: '公式审核 · 等待中', busy: `公式审核中${f.busy ? ` · ${f.busy} 个` : ''}`, offline: '公式审核 agent 离线' }[f.state];
+    fe.className = `pill ${f.state}`;
+    fe.title = f.lastSeen ? `最近一次联系：${new Date(f.lastSeen).toLocaleTimeString()}` : '公式审核 agent 还没连上';
+  }
 }
 
 function renderCompile() {
@@ -105,7 +113,7 @@ function connect() {
     state.items = next;
     renderItems();
   });
-  es.addEventListener('jobs', (e) => { state.jobs = JSON.parse(e.data); renderJobs(); });
+  es.addEventListener('jobs', (e) => { state.jobs = JSON.parse(e.data); renderJobs(); renderAgent(); });
   es.addEventListener('changes', (e) => { state.changes = JSON.parse(e.data); renderChangesBtn(); refreshMarks(); redrawAll(); });
   es.addEventListener('agent', (e) => { state.agent = JSON.parse(e.data); renderAgent(); });
   es.addEventListener('compile', (e) => { state.compile = JSON.parse(e.data); renderCompile(); });

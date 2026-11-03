@@ -14,6 +14,11 @@ import { locatePdfSelection } from './anchors.js';
 import { lineStarts, offsetToLine } from './texfiles.js';
 import { TexFiles } from './texfiles.js';
 
+// 进程退出时留一行记录，方便查服务为什么停了
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP']) process.on(sig, () => { console.error(`[${new Date().toISOString()}] 收到 ${sig}，退出`); process.exit(0); });
+process.on('exit', (code) => console.error(`[${new Date().toISOString()}] 进程退出 code=${code}`));
+process.on('uncaughtException', (e) => { console.error(`[${new Date().toISOString()}] 未捕获异常`, e); process.exit(1); });
+
 const cfg = loadConfig();
 const files = new TexFiles(cfg);
 const store = new Store(cfg.dataDir);
@@ -142,7 +147,7 @@ app.post('/api/items/:id/undo', (req, res) => res.json(review.undo(req.params.id
 
 app.get('/api/jobs', (req, res) => res.json(jobs.views()));
 app.post('/api/jobs/preview', async (req, res) => res.json(await jobs.preview(req.body)));
-app.post('/api/jobs', async (req, res) => res.json(await jobs.create(req.body)));
+app.post('/api/jobs', async (req, res) => res.json(await (req.body?.type === 'formula' ? jobs.createFormula(req.body) : jobs.create(req.body))));
 app.post('/api/jobs/:id/pause', (req, res) => res.json(jobs.pause(req.params.id)));
 app.post('/api/jobs/:id/resume', (req, res) => res.json(jobs.resume(req.params.id)));
 app.post('/api/jobs/:id/cancel', (req, res) => res.json(jobs.cancel(req.params.id)));

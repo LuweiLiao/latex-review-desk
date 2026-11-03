@@ -53,6 +53,9 @@ export const STATUS = {
   rejected: '已驳回',
 };
 
+// 公式审核的结论
+export const VERDICT = { pass: '通过', issue: '有问题', unsure: '拿不准' };
+
 export const OPEN = new Set(['pending', 'claimed', 'proposed', 'replied']);
 
 export function timeAgo(t) {
