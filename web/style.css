@@ -299,3 +299,7 @@ details.why > div { margin: 4px 0 0 2px; }
 .tag.verdict-issue { background: #fde2e1; color: #b3261e; }
 .tag.verdict-unsure { background: #fff1d6; color: #8a5a00; }
 .card .quote.tex { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; white-space: pre-wrap; max-height: 9em; overflow: auto; }
+/* 栏窄时：按钮不折字，下拉框先缩，再放不下就换到第二行 */
+.pane-bar { height: auto; min-height: 36px; flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
+.pane-bar .btn, .pane-bar .save-status, .pane-bar #zoomLabel { white-space: nowrap; flex-shrink: 0; }
+.pane-bar select { min-width: 90px; flex-shrink: 1; }
