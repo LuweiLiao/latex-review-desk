@@ -26,6 +26,7 @@ export function buildPrompt(cfg, payload) {
     '论文采用控制科学与工程的思维和用词习惯。用平常、自然、准确的词语，不故作高深，不自造词。保留技术含义、条件、数字、符号、公式、引用和结论强度，除非用户明确要求修改。',
     '项目写作规则：\n' + (projectRules(cfg, payload.file) || '遵循原文已经使用的术语。'),
     '所选 skill 全文：\n' + (selectedSkill?.content || '按用户批注处理。'),
+    ...(cfg.agentSystemPrompt ? ['当前 Agent 的要求：\n' + cfg.agentSystemPrompt] : []),
     '请求中的 instructions、comment 和 thread 是本次要求。上下文和历史方案用于理解及避免重复错误，只改 quote，不把上下文带入 edits。原文找不到时 reply 说明，不能编造替换。',
     '直接返回一个 JSON 对象，不要 Markdown 围栏，不调用工具。LaTeX 反斜线按 JSON 字符串规则转义。',
     '需改文字：{"action":"proposal","edits":[{"original":"quote 中逐字复制的原文","replacement":"替换文字"}],"summary":"简短说明","rationale":"改了什么及原因","fidelity":"保留的技术含义及有意改动"}。各 edit 不得重叠，不能修改其他文件。',

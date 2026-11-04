@@ -19,7 +19,8 @@
     <button id="confirmChangesBtn" class="chg-btn" hidden title="已写入的修改在源码和 PDF 上标黄；看过没问题点这里，去掉标黄">确认修改 <span class="count"></span></button>
     <div id="dirtyBanner" class="banner" hidden></div>
     <div class="spacer"></div>
-    <button id="apiSettingsBtn" class="btn small">API 设置</button>
+    <select id="activeAgentSelect" title="默认 Agent；任务可在设置中分别指定" aria-label="默认 Agent"></select>
+    <button id="apiSettingsBtn" class="btn small">Agent 设置</button>
     <div id="agentStatus" class="pill" title="后台 agent 状态">agent 离线</div>
     <div id="formulaAgentStatus" class="pill" hidden></div>
     <select id="recipeSelect" title="编译配方；按 Ctrl+S 保存并用这个配方编译"></select>
@@ -43,7 +44,7 @@
       <div id="projectFiles" role="tree" aria-label="项目文件"></div>
       <div class="project-footer">
         <button id="texEnvironmentBtn" class="environment-status">TeX 环境：检查中…</button>
-        <button id="apiRunBtn" class="btn small">API 任务设置</button>
+        <button id="apiRunBtn" class="btn small">Agent 任务设置</button>
         <div id="apiTaskStatus" role="status">尚无 API 任务</div>
       </div>
     </aside>
@@ -125,23 +126,27 @@
       <p class="muted">直接使用原目录，接受的修改会写回该目录。需要副本时，请用“导入文件夹副本”。</p>
       <label class="field-label">项目名称（可不填）<input id="projectName" autocomplete="off"></label>
       <label class="field-label">本地文件夹路径<input id="folderPath" placeholder="例如 D:\论文\我的项目" autocomplete="off" required></label>
-      <div class="dialog-actions"><button type="button" id="browseFolderBtn" class="btn">浏览目录</button><button type="submit" class="btn primary">打开原文件夹</button></div>
-      <div id="folderBrowser" hidden><div class="folder-location"><button type="button" id="folderParentBtn" class="btn small">上一级</button><span id="folderLocation"></span></div><div id="folderEntries"></div></div>
+      <div class="dialog-actions"><button type="button" id="browseFolderBtn" class="btn">系统选择文件夹…</button><button type="submit" class="btn primary">打开原文件夹</button></div>
       <div id="projectDialogStatus" class="dialog-status" role="status"></div>
     </form>
   </dialog>
   <dialog id="apiDialog" class="workspace-dialog" aria-labelledby="apiDialogTitle">
     <form id="apiSettingsForm">
-      <div class="dialog-heading"><h2 id="apiDialogTitle">API 设置</h2><button type="button" class="btn small" data-close-dialog>关闭</button></div>
+      <div class="dialog-heading"><h2 id="apiDialogTitle">Agent 与模型配置</h2><button type="button" class="btn small" data-close-dialog>关闭</button></div>
+      <div class="agent-config-layout"><aside class="agent-config-list"><b>已保存的 Agent</b><div id="agentList"></div><button type="button" id="addAgentBtn" class="btn">＋ 新增 Agent</button></aside><div class="agent-config-fields">
+      <label class="field-label">Agent 名称<input id="agentName" required placeholder="例如：中文润色、公式审核"></label>
       <label class="field-label">接口格式<select id="apiFormat"><option value="openai">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Gemini</option></select></label>
       <label class="field-label">Base URL<input id="apiBaseUrl" type="url" placeholder="https://api.example.com/v1" required></label>
       <label class="field-label">API Key<input id="apiKey" type="password" autocomplete="new-password" placeholder="输入密钥"></label>
       <div id="apiKeyHint" class="muted"></div>
       <label class="field-label">模型<input id="apiModel" placeholder="模型名称" required></label>
       <label class="field-label">同时处理数量<select id="apiConcurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+      <label class="field-label">Agent 提示词<textarea id="agentSystemPrompt" rows="4" placeholder="这个 Agent 的职责、表达要求或审核重点"></textarea></label>
       <label class="chk"><input id="apiEnabled" type="checkbox"> 启用 API，自动处理新的待办和重新提交的任务</label>
       <p class="muted">默认使用 basic-polish 润色规则。修改方案仍需在审阅台确认后才会写入源码。</p>
-      <div class="dialog-actions"><button type="button" id="testApiBtn" class="btn">测试连接</button><button type="submit" class="btn primary">保存设置</button></div>
+      <div class="dialog-actions"><button type="button" id="testApiBtn" class="btn">测试连接</button><button type="submit" class="btn primary">保存 Agent</button><button type="button" id="setDefaultAgentBtn" class="btn">设为默认</button><button type="button" id="deleteAgentBtn" class="btn danger">删除</button></div>
+      </div></div>
+      <fieldset class="agent-assignments"><legend>按任务选择 Agent</legend><label>正文润色<select id="polishAgentSelect"></select></label><label>批注回复<select id="commentAgentSelect"></select></label><label>公式审核<select id="formulaAgentSelect"></select></label><button type="button" id="saveAgentAssignmentsBtn" class="btn">保存任务分工</button></fieldset>
       <div id="apiSettingsStatus" class="dialog-status" role="status"></div>
     </form>
   </dialog>

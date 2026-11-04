@@ -4,7 +4,8 @@ import { openFile, save, hasUnsavedSource } from './source.js';
 import { prefs } from './storage.js';
 
 let tree = null;
-let folderParent = null;
+let agentConfig = null;
+let editingAgentId = null;
 let importing = false;
 let environment = null;
 
@@ -121,17 +122,28 @@ async function loadTree() {
   catch (e) { toast(`文件树加载失败：${e.message}`, true); }
 }
 
-async function browseFolder(path = '') {
-  status('#projectDialogStatus', '正在读取目录…');
-  const result = await api('GET', '/api/folders' + (path ? `?path=${encodeURIComponent(path)}` : ''));
-  $('#folderBrowser').hidden = false;
+async function browseFolder(initialPath = '') {
+  status('#projectDialogStatus', '请在系统窗口中选择文件夹…');
+  const result = await api('POST', '/api/folders/choose', { initialPath });
+  if (result.cancelled) { status('#projectDialogStatus', '已取消选择。'); return null; }
   $('#folderPath').value = result.path;
-  $('#folderLocation').textContent = result.path;
-  folderParent = result.parent;
-  $('#folderParentBtn').disabled = !folderParent;
-  $('#folderEntries').replaceChildren(...result.folders.map((folder) => h('button', { type: 'button', class: 'folder-entry', onclick: () => inDialog('#projectDialogStatus', () => browseFolder(folder.path)) }, `▸ ${folder.name}`)));
-  if (!result.folders.length) $('#folderEntries').append(h('p', { class: 'muted' }, '该目录没有子文件夹，可直接打开。'));
-  status('#projectDialogStatus', '选择目录后，点击“打开原文件夹”。');
+  status('#projectDialogStatus', '已选择文件夹，可直接打开。');
+  return result.path;
+}
+
+async function openNativeProject() {
+  const button = $('#openProjectBtn');
+  button.disabled = true;
+  try {
+    await leaveProject();
+    const folder = await browseFolder(state.project?.projectRoot || '');
+    if (!folder) return;
+    const project = await api('POST', '/api/projects', { projectRoot: folder });
+    await activate(project);
+  } catch (error) {
+    $('#projectDialog').showModal();
+    status('#projectDialogStatus', error.message, true);
+  } finally { button.disabled = false; }
 }
 
 function fileBase64(file) {
@@ -180,6 +192,9 @@ async function collectEntry(entry, prefix = '') {
 
 function apiForm() {
   return {
+    agentId: editingAgentId,
+    name: $('#agentName').value.trim(),
+    systemPrompt: $('#agentSystemPrompt').value,
     format: $('#apiFormat').value,
     baseUrl: $('#apiBaseUrl').value.trim(),
     model: $('#apiModel').value.trim(),
@@ -189,20 +204,51 @@ function apiForm() {
   };
 }
 
+function selectAgent(id) {
+  const config = agentConfig.agents.find((agent) => agent.id === id);
+  if (!config) return;
+  editingAgentId = config.id;
+  $('#agentName').value = config.name;
+  $('#agentSystemPrompt').value = config.systemPrompt || '';
+  $('#apiFormat').value = config.format;
+  $('#apiBaseUrl').value = config.baseUrl || '';
+  $('#apiModel').value = config.model || '';
+  $('#apiEnabled').checked = !!config.enabled;
+  $('#apiConcurrency').value = config.concurrency || 1;
+  $('#apiKey').value = '';
+  $('#apiKey').placeholder = config.hasApiKey ? '已保存密钥；留空保留原密钥' : '输入密钥';
+  $('#apiKeyHint').textContent = config.hasApiKey ? '此 Agent 的密钥已保存在本机。' : '';
+  $('#deleteAgentBtn').disabled = agentConfig.agents.length < 2;
+  $('#setDefaultAgentBtn').disabled = config.id === agentConfig.activeAgentId;
+  renderAgentList();
+}
+
+function renderAgentList() {
+  $('#agentList').replaceChildren(...agentConfig.agents.map((agent) => h('button', {
+    type: 'button', class: 'btn agent-list-entry' + (agent.id === editingAgentId ? ' active' : ''),
+    onclick: () => { selectAgent(agent.id); status('#apiSettingsStatus', '编辑后点击“保存 Agent”。'); },
+  }, agent.name + (agent.id === agentConfig.activeAgentId ? ' · 默认' : ''), h('small', {}, agent.model || '尚未填写模型'))));
+}
+
+async function refreshAgentConfig(selected = editingAgentId) {
+  agentConfig = await api('GET', '/api/ai/config');
+  const agents = agentConfig.agents;
+  $('#activeAgentSelect').replaceChildren(...agents.map((agent) => new Option(agent.name, agent.id)));
+  $('#activeAgentSelect').value = agentConfig.activeAgentId;
+  for (const kind of ['polish', 'comment', 'formula']) {
+    const select = $('#' + kind + 'AgentSelect');
+    select.replaceChildren(new Option('使用默认 Agent', ''), ...agents.map((agent) => new Option(agent.name, agent.id)));
+    select.value = agentConfig.assignments[kind] || '';
+  }
+  selectAgent(agents.some((agent) => agent.id === selected) ? selected : agentConfig.activeAgentId);
+}
+
 async function openApiSettings() {
   $('#apiDialog').showModal();
-  status('#apiSettingsStatus', '正在读取设置…');
+  status('#apiSettingsStatus', '正在读取 Agent 配置…');
   await inDialog('#apiSettingsStatus', async () => {
-    const config = await api('GET', '/api/ai/config');
-    $('#apiFormat').value = config.format;
-    $('#apiBaseUrl').value = config.baseUrl || '';
-    $('#apiModel').value = config.model || '';
-    $('#apiEnabled').checked = !!config.enabled;
-    $('#apiConcurrency').value = config.concurrency || 1;
-    $('#apiKey').value = '';
-    $('#apiKey').placeholder = config.hasApiKey ? '已保存密钥；留空保留原密钥' : '输入密钥';
-    $('#apiKeyHint').textContent = config.hasApiKey ? '密钥已保存在本机，网页不会读取已保存的密钥。' : '';
-    status('#apiSettingsStatus', '测试连接会向所填接口发送一次请求。');
+    await refreshAgentConfig();
+    status('#apiSettingsStatus', '可保存多个 Agent，并分别指定给润色、批注和公式审核。');
   });
 }
 
@@ -290,10 +336,9 @@ export function initWorkspace({ setReadMode }) {
     try { await activate(state.projects.find((p) => p.id === id)); }
     finally { e.target.value = state.projectId || ''; e.target.disabled = false; }
   });
-  $('#openProjectBtn').onclick = () => { $('#projectDialog').showModal(); };
+  $('#openProjectBtn').onclick = openNativeProject;
   document.querySelectorAll('[data-close-dialog]').forEach((b) => { b.onclick = () => b.closest('dialog').close(); });
   $('#browseFolderBtn').onclick = () => inDialog('#projectDialogStatus', () => browseFolder($('#folderPath').value.trim()));
-  $('#folderParentBtn').onclick = () => inDialog('#projectDialogStatus', () => browseFolder(folderParent));
   $('#openProjectForm').onsubmit = async (e) => {
     e.preventDefault();
     const button = e.submitter;
@@ -324,14 +369,19 @@ export function initWorkspace({ setReadMode }) {
   }));
   $('#apiSettingsBtn').onclick = openApiSettings;
   $('#apiRunBtn').onclick = openApiSettings;
+  $('#apiFormat').onchange = () => {
+    const defaults = { openai: 'https://api.openai.com/v1', 'openai-responses': 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com/v1', gemini: 'https://generativelanguage.googleapis.com/v1beta' };
+    if (Object.values(defaults).includes($('#apiBaseUrl').value.trim())) $('#apiBaseUrl').value = defaults[$('#apiFormat').value];
+  };
   $('#apiSettingsForm').onsubmit = async (e) => {
     e.preventDefault();
     e.submitter.disabled = true;
     await inDialog('#apiSettingsStatus', async () => {
-      await api('PUT', '/api/ai/config', apiForm());
+      await api('PUT', `/api/ai/agents/${editingAgentId}`, apiForm());
+      await refreshAgentConfig();
       $('#apiKey').value = '';
       $('#apiKey').placeholder = '留空保留已保存的密钥';
-      status('#apiSettingsStatus', 'API 设置已保存。');
+      status('#apiSettingsStatus', 'Agent 已保存。');
       state.ai = await api('GET', '/api/ai/status'); renderAiStatus(state.ai);
     });
     e.submitter.disabled = false;
@@ -346,6 +396,33 @@ export function initWorkspace({ setReadMode }) {
     });
     $('#testApiBtn').disabled = false;
   };
+  $('#addAgentBtn').onclick = () => inDialog('#apiSettingsStatus', async () => {
+    const agent = await api('POST', '/api/ai/agents', { name: '新 Agent' });
+    await refreshAgentConfig(agent.id);
+    $('#agentName').focus();
+    status('#apiSettingsStatus', '填写这个 Agent 的接口、模型和密钥后保存。');
+  });
+  $('#setDefaultAgentBtn').onclick = () => inDialog('#apiSettingsStatus', async () => {
+    await api('PUT', '/api/ai/config', { activeAgentId: editingAgentId });
+    await refreshAgentConfig();
+    status('#apiSettingsStatus', '已设为默认 Agent。');
+  });
+  $('#deleteAgentBtn').onclick = () => inDialog('#apiSettingsStatus', async () => {
+    await api('DELETE', `/api/ai/agents/${editingAgentId}`);
+    await refreshAgentConfig(null);
+    status('#apiSettingsStatus', 'Agent 已删除。');
+  });
+  $('#saveAgentAssignmentsBtn').onclick = () => inDialog('#apiSettingsStatus', async () => {
+    const assignments = Object.fromEntries(['polish', 'comment', 'formula'].map((kind) => [kind, $('#' + kind + 'AgentSelect').value]));
+    await api('PUT', '/api/ai/config', { assignments });
+    status('#apiSettingsStatus', '任务分工已保存，新的请求将使用指定的 Agent。');
+  });
+  $('#activeAgentSelect').onchange = guard(async (event) => {
+    await api('PUT', '/api/ai/config', { activeAgentId: event.target.value });
+    await refreshAgentConfig();
+    state.ai = await api('GET', '/api/ai/status'); renderAiStatus(state.ai);
+  });
+  void refreshAgentConfig().catch((error) => toast(error.message, true));
   $('#texEnvironmentBtn').onclick = () => $('#texDialog').showModal();
   $('#refreshEnvironmentBtn').onclick = () => checkEnvironment(true);
   on('file-opened', () => document.querySelectorAll('.tree-file').forEach((button) => button.classList.toggle('active', button.dataset.file === state.openFile)));

@@ -13,6 +13,7 @@ import { backward, forward } from './synctex.js';
 import { locateFormula } from './formula.js';
 import { locatePdfSelection } from './anchors.js';
 import { lineStarts, offsetToLine } from './texfiles.js';
+import { createFolderPicker } from './folder-picker.js';
 
 const FORMATS = {
   openai: { provider: 'openai', apiFormat: 'chat' },
@@ -21,9 +22,9 @@ const FORMATS = {
   gemini: { provider: 'gemini', apiFormat: 'generateContent' },
 };
 const aiInput = (body = {}) => ({ ...body, ...(FORMATS[body.format] || {}) });
-const aiPublic = (value) => ({ ...value, format: value.provider === 'openai' ? value.apiFormat === 'responses' ? 'openai-responses' : 'openai' : value.provider });
+const aiPublic = (value) => ({ ...value, format: value.provider === 'openai' ? value.apiFormat === 'responses' ? 'openai-responses' : 'openai' : value.provider, ...(value.agents ? { agents: value.agents.map(aiPublic) } : {}) });
 
-export function createApp(cfg = loadConfig()) {
+export function createApp(cfg = loadConfig(), { pickFolder = createFolderPicker() } = {}) {
   const app = express();
   const projects = new Projects(cfg, { registryDir: path.join(cfg.configDir, 'projects') });
   const settings = new AiSettings(cfg.configDir, cfg.ai || {});
@@ -65,6 +66,10 @@ export function createApp(cfg = loadConfig()) {
   app.get('/api/projects', (req, res) => res.json({ projects: projects.list(), activeProjectId: projects.activeProjectId, activeProject: projects.activeProjectId ? projects.get(projects.activeProjectId) : null }));
   app.post('/api/projects', (req, res) => res.json(projects.register(req.body)));
   app.post('/api/projects/import', (req, res) => res.json(projects.import(req.body)));
+  app.post('/api/folders/choose', async (req, res) => {
+    const folder = await pickFolder(req.body?.initialPath || cfg.projectRoot || os.homedir());
+    res.json({ path: folder, cancelled: !folder });
+  });
   app.get('/api/projects/:id/tree', (req, res) => res.json(projects.tree(req.params.id)));
   app.post('/api/projects/:id/activate', (req, res) => {
     const project = projects.setActive(req.params.id);
@@ -88,6 +93,9 @@ export function createApp(cfg = loadConfig()) {
   });
   app.get('/api/ai/config', (req, res) => res.json(aiPublic(settings.public())));
   app.put('/api/ai/config', (req, res) => res.json(aiPublic(settings.update(aiInput(req.body)))));
+  app.post('/api/ai/agents', (req, res) => res.json(aiPublic(settings.addAgent(aiInput(req.body)))));
+  app.put('/api/ai/agents/:id', (req, res) => res.json(aiPublic(settings.updateAgent(req.params.id, aiInput(req.body)))));
+  app.delete('/api/ai/agents/:id', (req, res) => res.json(aiPublic(settings.removeAgent(req.params.id))));
   app.post('/api/ai/test', async (req, res) => res.json(await testConnection(settings.forRequest(aiInput(req.body)))));
   app.get('/api/ai/status', (req, res) => res.json(selectedId(req) ? context(selectedId(req)).ai.status() : emptyState().ai));
   app.post('/api/ai/retry/:id', scoped((req, res, ctx) => res.json(ctx.ai.retry(req.params.id))));

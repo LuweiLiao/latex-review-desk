@@ -91,6 +91,22 @@ test('AI executor drains sequential Jobs using proposals and no-change replies w
   assert.equal(s.jobs.view(s.jobs.find(job.id)).counts.proposed, 1);
 });
 
+test('different task kinds call the assigned agent model and include its prompt', async (t) => {
+  const s = await setup(t);
+  const specialist = s.settings.addAgent({ name: '批注助手', model: 'comment-model', apiKey: 'comment-key', baseUrl: s.baseUrl, systemPrompt: '先回答控制问题。' });
+  s.settings.update({ assignments: { comment: specialist.id } });
+  s.executor.start();
+  const polish = await s.create();
+  const comment = await s.create('第二段介绍控制方法，并说明闭环系统的稳定性条件。', { kind: 'comment', comment: '解释这个条件' });
+  await until(() => s.review.find(polish.id).status === 'replied' && s.review.find(comment.id).status === 'replied');
+  assert.equal(s.requests.find((r) => r.payload.id === polish.id).body.model, 'mock-model');
+  const commentRequest = s.requests.find((r) => r.payload.id === comment.id);
+  assert.equal(commentRequest.body.model, 'comment-model');
+  assert.match(commentRequest.body.messages[0].content, /先回答控制问题/);
+  assert.equal(s.review.find(comment.id).ai.agentId, specialist.id);
+  assert.equal(s.review.find(polish.id).ai.agentId, 'default');
+});
+
 test('AI executor errors are visible, release claims and wait for explicit retry', async (t) => {
   let fail = true;
   const s = await setup(t, (_payload, res) => {

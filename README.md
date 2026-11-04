@@ -93,7 +93,13 @@ npm start -- /path/to/latex-project
 
 ### 配置 AI
 
-网页的 AI 设置中选择接口格式，填写 API 地址、模型和密钥后测试连接。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic 和 Gemini 格式；配置后可直接处理批注和润色请求。项目的写作要求可保存在项目设置中。密钥保存在用户配置目录，不随 npm 包分发。
+右上角“Agent 设置”可以保存多组 Agent。每组分别配置名称、接口格式、API 地址、模型、密钥、提示词和同时处理数量，支持 OpenAI Chat Completions、OpenAI Responses、Anthropic 和 Gemini。各组配置独立保存，切换 Agent 不会覆盖其他组的模型或密钥。
+
+顶部下拉框选择默认 Agent；设置窗口底部可以为正文润色、批注回复和公式审核分别指定 Agent。选择“使用默认 Agent”的任务跟随顶部选择。各条处理结果会显示实际使用的 Agent 名称。原来的单组 API 设置会自动作为默认 Agent 读取。
+
+“打开文件夹”直接调用操作系统的文件夹选择窗口，选择后使用原目录；“导入文件夹副本”仍将上传或拖入的文件夹复制到工具管理目录。Windows 使用系统原生文件夹选择器，macOS 使用系统选择器，Linux 使用 zenity；无法打开原生窗口时可手动输入路径。
+
+项目的写作要求可保存在项目设置中。密钥保存在用户配置目录，不随安装包分发。
 
 ### 接上 MCP agent
 

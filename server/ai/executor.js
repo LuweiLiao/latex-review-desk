@@ -30,10 +30,12 @@ export class AiExecutor extends EventEmitter {
 
   status() {
     const config = this.settings.get();
-    const configured = !!(config.model && config.apiKey && config.baseUrl);
+    const agents = ['polish', 'comment', 'formula'].map((kind) => this.settings.getFor(kind));
+    const configured = agents.some((agent) => !!(agent.model && agent.apiKey && agent.baseUrl));
     return {
       state: !configured ? 'unconfigured' : this.active.size ? 'busy' : this.lastError ? 'error' : 'idle',
-      configured, enabled: config.enabled, busy: this.active.size,
+      configured, enabled: agents.some((agent) => agent.enabled), busy: this.active.size,
+      agentId: config.id, agentName: config.name,
       running: this.started, lastError: this.lastError || null,
       activeIds: [...this.active.keys()],
     };
@@ -113,19 +115,29 @@ export class AiExecutor extends EventEmitter {
   }
 
   #dispatch() {
-    const config = this.settings.get();
-    if (!config.enabled || !this.status().configured) { this.#notify(); return; }
-    const count = config.concurrency - this.active.size;
+    const routed = ['polish', 'comment', 'formula'].map((kind) => this.settings.getFor(kind));
+    const unique = [...new Map(routed.filter((config) => config.enabled).map((config) => [config.id, config])).values()];
+    const count = Math.min(3, unique.reduce((sum, config) => sum + config.concurrency, 0)) - this.active.size;
     if (count <= 0) return;
-    const ids = this.review.items.filter((it) => it.status === 'pending' && !this.active.has(it.id) && this.#jobActive(it) && this.blocked.get(it.id) !== requestStamp(it))
-      .sort((a, b) => a.updatedAt - b.updatedAt).slice(0, count).map((it) => it.id);
+    const budgets = new Map();
+    for (const entry of this.active.values()) budgets.set(entry.agentId, (budgets.get(entry.agentId) || 0) + 1);
+    const ids = [];
+    const pending = this.review.items.filter((it) => it.status === 'pending' && !this.active.has(it.id) && this.#jobActive(it) && this.blocked.get(it.id) !== requestStamp(it)).sort((a, b) => a.updatedAt - b.updatedAt);
+    for (const item of pending) {
+      const config = this.settings.getFor(item.kind);
+      const used = budgets.get(config.id) || 0;
+      if (!config.enabled || !config.model || !config.apiKey || used >= config.concurrency) continue;
+      ids.push(item.id); budgets.set(config.id, used + 1);
+      if (ids.length === count) break;
+    }
     if (!ids.length) { this.#notify(); return; }
     const payloads = this.review.claimIds(ids);
     for (const payload of payloads) {
       const item = this.review.find(payload.id);
-      const entry = { controller: new AbortController(), claimedAt: item.claimedAt, stamp: requestStamp(item), committing: false };
+      const config = this.settings.getFor(item.kind);
+      const entry = { agentId: config.id, controller: new AbortController(), claimedAt: item.claimedAt, stamp: requestStamp(item), committing: false };
       this.active.set(item.id, entry);
-      item.ai = { state: 'running', provider: config.provider, model: config.model, requeuedAt: item.requeuedAt, startedAt: Date.now() };
+      item.ai = { state: 'running', agentId: config.id, agentName: config.name, provider: config.provider, model: config.model, requeuedAt: item.requeuedAt, startedAt: Date.now() };
       entry.promise = this.#execute(payload, entry, config).finally(() => {
         if (this.active.get(item.id) === entry) this.active.delete(item.id);
         this.#notify();
@@ -143,7 +155,7 @@ export class AiExecutor extends EventEmitter {
 
   async #execute(payload, entry, config) {
     try {
-      const response = await generateText(config, buildPrompt(this.cfg, payload), { signal: entry.controller.signal, fetchImpl: this.fetchImpl });
+      const response = await generateText(config, buildPrompt({ ...this.cfg, agentSystemPrompt: config.systemPrompt }, payload), { signal: entry.controller.signal, fetchImpl: this.fetchImpl });
       entry.controller.signal.throwIfAborted();
       const item = this.#owned(payload.id, entry);
       if (!item || !this.#jobActive(item)) return;

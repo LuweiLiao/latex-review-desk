@@ -9,11 +9,11 @@ import { createApp } from '../server/index.js';
 import { loadConfig } from '../server/config.js';
 
 const SOURCE = '\\documentclass{article}\n\\begin{document}\nThis controller improves the tracking performance.\n\\end{document}\n';
-async function setup(t) {
+async function setup(t, options) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-http-'));
   const cfg = loadConfig(null, { THESIS_REVIEW_CONFIG_DIR: path.join(root, 'config'), THESIS_REVIEW_DATA_DIR: path.join(root, 'data') });
   cfg.port = 0;
-  const app = createApp(cfg);
+  const app = createApp(cfg, options);
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => { await app.locals.close(); await new Promise((done) => server.close(done)); fs.rmSync(root, { recursive: true, force: true }); });
@@ -42,6 +42,32 @@ test('HTTP starts without a project and returns bundled polishing rules', async 
   const config = await call('GET', '/api/ai/config');
   assert.equal(config.hasApiKey, false);
   assert.equal(config.format, 'openai');
+});
+
+test('native folder picker returns selected path or cancellation without copying/registering files', async (t) => {
+  const calls = [];
+  let selected = 'D:\\论文\\测试项目';
+  const { call } = await setup(t, { pickFolder: async (initial) => { calls.push(initial); return selected; } });
+  assert.deepEqual(await call('POST', '/api/folders/choose', { initialPath: 'D:\\论文' }), { path: selected, cancelled: false });
+  assert.equal(calls[0], 'D:\\论文');
+  selected = null;
+  assert.deepEqual(await call('POST', '/api/folders/choose', {}), { path: null, cancelled: true });
+  assert.deepEqual((await call('GET', '/api/projects')).projects, []);
+});
+
+test('HTTP agent CRUD, defaults and task routing preserve separate secrets', async (t) => {
+  const { call } = await setup(t);
+  const second = await call('POST', '/api/ai/agents', { name: '公式助手', format: 'gemini', apiKey: 'gemini-secret', model: 'gemini-model' });
+  assert.equal(second.format, 'gemini'); assert.equal(second.hasApiKey, true); assert.equal('apiKey' in second, false);
+  const updated = await call('PUT', `/api/ai/agents/${second.id}`, { name: '公式审核', model: 'new-model', apiKey: '' });
+  assert.equal(updated.agents.find((a) => a.id === second.id).model, 'new-model');
+  const assigned = await call('PUT', '/api/ai/config', { activeAgentId: second.id, assignments: { formula: second.id } });
+  assert.equal(assigned.activeAgentId, second.id);
+  assert.equal(assigned.assignments.formula, second.id);
+  assert.ok(!JSON.stringify(assigned).includes('gemini-secret'));
+  const removed = await call('DELETE', `/api/ai/agents/${second.id}`);
+  assert.equal(removed.agents.length, 1);
+  assert.equal(removed.assignments.formula, '');
 });
 
 test('HTTP project contexts isolate identical names, state, and writes after global selection changes', async (t) => {

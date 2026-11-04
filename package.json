@@ -1,6 +1,6 @@
 {
   "name": "latex-review-desk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Multi-project local LaTeX review with direct OpenAI, Anthropic and Gemini APIs, PDF/source comparison, annotations and confirmed edits.",
   "type": "module",
   "bin": {
