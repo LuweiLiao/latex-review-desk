@@ -15,11 +15,13 @@ This release adds a CLI/npm distribution, multiple local/imported LaTeX projects
 
 ## Publication
 
-GitHub source publication and npm registry publication are separate. npm registry publication requires the maintainer to log in with `npm login`. Users can install the generated `.tgz` directly before registry publication.
+This version is distributed as a prebuilt GitHub Release asset. npm installs the asset directly; no npm publishing permission or npm account login is needed to install it.
 
 ```powershell
-npm install -g ./latex-review-desk-0.3.0.tgz
+npm install -g "https://github.com/LuweiLiao/latex-review-desk/releases/download/v0.3.0/latex-review-desk-0.3.0.tgz"
 latex-review-desk "D:/papers/example" --port 4320
 ```
 
 The installed package requires Node 22.13 or newer. TeX is required for compiling papers, not for opening the app and configuring projects or AI.
+
+Alternatively, download the `.tgz` asset and install it with `npm install -g ./latex-review-desk-0.3.0.tgz`. Update by installing a newer release asset; uninstall with `npm uninstall -g latex-review-desk`.

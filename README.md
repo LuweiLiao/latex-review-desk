@@ -25,14 +25,30 @@
 
 需要 Node 22.13+。编译和源码/PDF 跳转需要带 `synctex` 的 TeX 发行版（TeX Live / MiKTeX）；没有安装 TeX 时也可以启动网页、管理项目和设置 AI。
 
-### npm 安装包
+### 从 GitHub 安装（推荐）
+
+使用 npm 直接安装 GitHub Release 中已经构建的软件包。无需克隆源码、构建前端或登录 npm 账户。
 
 ```bash
-npm install -g latex-review-desk
+npm install -g "https://github.com/LuweiLiao/latex-review-desk/releases/download/v0.3.0/latex-review-desk-0.3.0.tgz"
 latex-review-desk /path/to/latex-project
 ```
 
-启动后自动打开浏览器，默认地址为 `http://127.0.0.1:4317/`。不传项目路径时使用当前目录；主文件默认为 `main.tex`，可在网页中选择或通过参数指定。npm 包带有已经构建的前端和 PDF.js 文件，安装时不运行前端构建，也不需要安装开发依赖。
+启动后自动打开浏览器，默认地址为 `http://127.0.0.1:4317/`。不传项目路径时使用当前目录；主文件默认为 `main.tex`，可在网页中选择或通过参数指定。安装包带有已经构建的前端和 PDF.js 文件，安装时不运行前端构建，也不需要安装开发依赖。当前通过 GitHub Release 分发，不使用尚未发布的 `npm install -g latex-review-desk` 命令。
+
+Windows 示例：
+
+```powershell
+latex-review-desk "D:/papers/my thesis" --port 4320
+```
+
+也可从 Release 下载 `latex-review-desk-0.3.0.tgz`，在下载目录中安装：
+
+```powershell
+npm install -g ./latex-review-desk-0.3.0.tgz
+```
+
+更新时安装新版本 Release 对应的地址；卸载使用 `npm uninstall -g latex-review-desk`。
 
 ```bash
 latex-review-desk "D:/papers/my thesis" --main master.tex --pdf master.pdf --port 4320
@@ -48,9 +64,9 @@ latex-review-desk --check-compile --engine xelatex
 ### 从源码运行
 
 ```bash
-git clone https://github.com/LuweiLiao/latex-review-desk.git
+git clone --branch v0.3.0 https://github.com/LuweiLiao/latex-review-desk.git
 cd latex-review-desk
-npm install
+npm ci
 npm run build
 npm start -- /path/to/latex-project
 ```
