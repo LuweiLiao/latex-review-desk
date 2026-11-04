@@ -1,3 +1,4 @@
+import { prefs } from './storage.js';
 // “修改方案”页：修改前 / 修改后对照，接受、编辑后接受、驳回、带意见重做、撤销
 import { applyEdits, diffWords } from '../lib/diff.js';
 import { api, $, h, guard, toast, STATUS } from './util.js';
@@ -117,7 +118,7 @@ async function pcard(it) {
 function redoBox(it, card) {
   if (card.querySelector('.redo-box')) return;
   editing.add(it.id);
-  const sel = skillSelect(it.skill || localStorage.getItem('lastSkill') || state.defaultSkill);
+  const sel = skillSelect(it.skill || prefs.getItem('lastSkill') || state.defaultSkill);
   const ta = h('textarea', { placeholder: '哪里不满意（可不填，只换 skill 也行）' });
   const done = () => { editing.delete(it.id); renderReview(); };
   const box = h('div', { class: 'redo-box' },
@@ -125,7 +126,7 @@ function redoBox(it, card) {
     h('div', { class: 'pactions' },
       h('button', { class: 'btn primary', onclick: guard(async () => {
         if (!ta.value.trim() && sel.value === it.skill) return toast('写一句意见，或换一个 skill');
-        localStorage.setItem('lastSkill', sel.value);
+        prefs.setItem('lastSkill', sel.value);
         await api('POST', `/api/items/${it.id}/requeue`, { message: ta.value, skill: sel.value });
         toast(`已发回重做（${sel.value}）`);
         done();

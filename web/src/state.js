@@ -1,5 +1,9 @@
 // 全局状态和简单的事件总线
 export const state = {
+  projectId: null,
+  project: null,
+  projects: [],
+  ai: null,
   items: [],
   files: [],
   fileTitles: {},

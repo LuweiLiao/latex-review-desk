@@ -1,4 +1,7 @@
-import { api, $, h, toast, guard, short } from './util.js';
+import { prefs } from './storage.js';
+import { api, $, h, toast, guard, short, setRequestProject, projectUrl } from './util.js';
+import { setProjectScope } from './storage.js';
+import { initWorkspace, renderWorkspace, renderAiStatus } from './workspace.js';
 import { state, on, emit } from './state.js';
 import { initSource, fillFileSelect, openFile, refreshMarks, revealItem, revealLine, revealRange, reloadIfChanged, currentFile, save } from './source.js';
 import { initPdf, loadPdf, redrawAll, revealItemInPdf, syncToPdf } from './pdfview.js';
@@ -9,7 +12,7 @@ import { renderJobs } from './jobs.js';
 
 function setMode(mode) {
   state.mode = mode;
-  localStorage.setItem('mode', mode);
+  prefs.setItem('mode', mode);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
   $('#readView').hidden = mode !== 'read';
   $('#reviewView').hidden = mode !== 'review';
@@ -28,17 +31,33 @@ function renderChangesBtn() {
 function renderAgent() {
   const a = state.agent;
   const el = $('#agentStatus');
+  if (state.ai?.configured || !a.lastSeen) {
+    const ai = state.ai || {};
+    el.textContent = ai.configured ? ai.enabled === false ? 'API 已停用' : ai.busy ? `API 处理中 · ${ai.busy} 条` : ai.lastError ? 'API 请求出错' : 'API 已就绪' : '请配置 API';
+    el.className = `pill ${ai.lastError ? 'err' : ai.busy ? 'busy' : ai.configured ? 'ok' : ''}`;
+    el.title = ai.lastError || '在 API 设置中选择接口、模型并填写密钥';
+    $('#formulaAgentStatus').hidden = true;
+    return;
+  }
   const label = { waiting: 'agent 在线 · 等待中', busy: `agent 处理中${a.busy ? ` · ${a.busy} 条` : ''}`, offline: 'agent 离线' }[a.state];
   el.textContent = label;
   el.className = `pill ${a.state}`;
   el.title = a.lastSeen ? `最近一次联系：${new Date(a.lastSeen).toLocaleTimeString()}` : '还没有 agent 连接过。在 Claude Code 里运行 /thesis-review-agent';
+  // 公式审核 agent：连过才显示
+  const f = a.formula, fe = $('#formulaAgentStatus');
+  fe.hidden = !f?.lastSeen && !state.jobs?.some((j) => j.type === 'formula' && j.status === 'running');
+  if (f) {
+    fe.textContent = { waiting: '公式审核 · 等待中', busy: `公式审核中${f.busy ? ` · ${f.busy} 个` : ''}`, offline: '公式审核 agent 离线' }[f.state];
+    fe.className = `pill ${f.state}`;
+    fe.title = f.lastSeen ? `最近一次联系：${new Date(f.lastSeen).toLocaleTimeString()}` : '公式审核 agent 还没连上';
+  }
 }
 
 function renderCompile() {
   const c = state.compile;
   const el = $('#compileStatus');
-  $('#compileBtn').disabled = !!c.running;
-  $('#recipeSelect').disabled = !!c.running;
+  $('#compileBtn').disabled = !state.projectId || !!c.running;
+  $('#recipeSelect').disabled = !state.projectId || !!c.running;
   $('#stopBtn').hidden = !c.running;
   if (c.running) {
     const step = c.steps?.length > 1 ? ` ${c.step}/${c.steps.length} ${c.steps[c.step - 1] || ''}` : '';
@@ -63,7 +82,7 @@ function renderDirty() {
 function renderCounts() {
   const n = state.items.filter((it) => it.status === 'proposed').length;
   $('#proposalCount').textContent = n || '';
-  document.title = `${n ? `(${n}) ` : ''}论文审阅台`;
+  document.title = `${n ? `(${n}) ` : ''}${state.project?.name ? state.project.name + ' · ' : ''}论文审阅台`;
 }
 
 function renderItems() {
@@ -71,6 +90,7 @@ function renderItems() {
   refreshMarks();
   redrawAll();
   renderCounts();
+  renderAiStatus(state.ai);
   if (state.mode === 'review') renderReview();
 }
 
@@ -98,16 +118,17 @@ function notifyChanges(prev, next) {
 }
 
 function connect() {
-  const es = new EventSource('/events');
+  const es = new EventSource(projectUrl('/events'));
   es.addEventListener('items', (e) => {
     const next = JSON.parse(e.data);
     notifyChanges(state.items, next);
     state.items = next;
     renderItems();
   });
-  es.addEventListener('jobs', (e) => { state.jobs = JSON.parse(e.data); renderJobs(); });
+  es.addEventListener('jobs', (e) => { state.jobs = JSON.parse(e.data); renderJobs(); renderAgent(); });
   es.addEventListener('changes', (e) => { state.changes = JSON.parse(e.data); renderChangesBtn(); refreshMarks(); redrawAll(); });
   es.addEventListener('agent', (e) => { state.agent = JSON.parse(e.data); renderAgent(); });
+  es.addEventListener('ai', (e) => { state.ai = JSON.parse(e.data); renderAiStatus(state.ai); renderAgent(); });
   es.addEventListener('compile', (e) => { state.compile = JSON.parse(e.data); renderCompile(); });
   es.addEventListener('compile-progress', (e) => { $('#compileStatus').title = JSON.parse(e.data); });
   es.addEventListener('pdf', (e) => {
@@ -125,10 +146,14 @@ function connect() {
 }
 
 function applyState(s) {
+  state.projectId = s.projectId || s.project?.id || null;
+  state.project = s.project || null;
+  state.projects = s.projects || [];
+  state.ai = s.ai || null;
   state.items = s.items;
   // 刷新后恢复上次选中的批注（只恢复高亮，不跳位置，位置由各栏自己恢复）
   if (state.activeId == null) {
-    const a = localStorage.getItem('activeId');
+    const a = prefs.getItem('activeId');
     if (a && s.items.some((it) => it.id === a)) state.activeId = a;
   }
   state.files = s.files;
@@ -147,20 +172,21 @@ function applyState(s) {
   state.pdf = s.pdf;
   fillFileSelect();
   renderAgent(); renderCompile(); renderDirty(); renderItems();
+  renderWorkspace();
   return pdfChanged;
 }
 
 function fillRecipes(r) {
   const sel = $('#recipeSelect');
   if (!r || sel.options.length) return;
-  const saved = localStorage.getItem('recipe');
+  const saved = prefs.getItem('recipe');
   sel.replaceChildren(...r.names.map((n) => new Option(`配方: ${n}`, n)));
   sel.value = r.names.includes(saved) ? saved : r.default;
 }
 
 function initSplitter() {
   const view = $('#readView');
-  const saved = localStorage.getItem('split');
+  const saved = prefs.getItem('split');
   if (saved) view.style.setProperty('--split', saved);
   const sp = $('#splitter');
   sp.addEventListener('mousedown', (ev) => {
@@ -173,7 +199,7 @@ function initSplitter() {
     };
     const up = () => {
       sp.classList.remove('drag');
-      localStorage.setItem('split', view.style.getPropertyValue('--split'));
+      prefs.setItem('split', view.style.getPropertyValue('--split'));
       removeEventListener('mousemove', move);
       removeEventListener('mouseup', up);
     };
@@ -185,7 +211,7 @@ function initSplitter() {
 // 取消选中：高亮撤掉，展开的卡片收起
 function clearActive() {
   state.activeId = null;
-  localStorage.removeItem('activeId');
+  prefs.removeItem('activeId');
   document.querySelectorAll('.pcard.active').forEach((c) => c.classList.remove('active'));
   refreshMarks(); redrawAll(); renderSidebar();
 }
@@ -194,7 +220,7 @@ async function selectItem({ id, from }) {
   const it = state.items.find((x) => x.id === id);
   if (!it) return;
   state.activeId = id;
-  localStorage.setItem('activeId', id);
+  prefs.setItem('activeId', id);
   document.querySelectorAll('.pcard').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
   renderSidebar();
   if (from === 'review') setMode('read');
@@ -206,6 +232,9 @@ async function selectItem({ id, from }) {
 }
 
 async function main() {
+  const s = await api('GET', '/api/state');
+  setRequestProject(s.projectId || s.project?.id);
+  setProjectScope(s.projectId || s.project?.id || s.projectRoot || 'default');
   initSource();
   initPdf();
   initSidebar();
@@ -215,6 +244,7 @@ async function main() {
 
   document.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
   const compile = async (fromKey = false) => {
+    if (!state.projectId) return toast('请先打开项目。');
     const r = await api('POST', '/api/compile', { recipe: $('#recipeSelect').value });
     if (!r.started) toast(fromKey ? '已保存；上一次编译还没结束，结束后再按 Ctrl+S' : '已经在编译了');
   };
@@ -235,7 +265,7 @@ async function main() {
     const r = await api('POST', '/api/changes/confirm', {});
     toast(`已确认 ${r.confirmed} 条修改`);
   });
-  $('#recipeSelect').onchange = (e) => localStorage.setItem('recipe', e.target.value);
+  $('#recipeSelect').onchange = (e) => prefs.setItem('recipe', e.target.value);
   $('#compileStatus').onclick = showCompileLog;
   $('#modal .modal-close').onclick = () => { $('#modal').hidden = true; };
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') $('#modal').hidden = true; };
@@ -263,22 +293,22 @@ async function main() {
     else await revealLine(line, file);
   }));
 
-  const s = await api('GET', '/api/state');
   applyState(s);
+  initWorkspace({ setReadMode: () => setMode('read') });
   state.skills = await api('GET', '/api/skills');
   const first = state.files.find((f) => /chapter1/.test(f)) || state.files[0];
-  await openFile(localStorage.getItem('lastFile') && state.files.includes(localStorage.getItem('lastFile')) ? localStorage.getItem('lastFile') : first);
+  await openFile(prefs.getItem('lastFile') && state.files.includes(prefs.getItem('lastFile')) ? prefs.getItem('lastFile') : first);
   await loadPdf().catch((e) => toast(`PDF 加载失败：${e.message}`, true));
   renderSidebar();
   renderJobs();
   connect();
-  if (localStorage.getItem('mode') === 'review') setMode('review');
+  if (prefs.getItem('mode') === 'review') setMode('review');
   // 侧栏滚动位置：对照卡片是异步载入的，高度稳定后再恢复
   const side = $('#itemList');
-  const sideTop = Number(localStorage.getItem('sideScroll') || 0);
+  const sideTop = Number(prefs.getItem('sideScroll') || 0);
   if (sideTop) setTimeout(() => { if (!side.classList.contains('rail-mode')) side.scrollTop = sideTop; }, 1200);
   let sideTimer = null;
-  side.addEventListener('scroll', () => { if (side.classList.contains('rail-mode')) return; clearTimeout(sideTimer); sideTimer = setTimeout(() => localStorage.setItem('sideScroll', String(side.scrollTop)), 300); }, { passive: true });
+  side.addEventListener('scroll', () => { if (side.classList.contains('rail-mode')) return; clearTimeout(sideTimer); sideTimer = setTimeout(() => prefs.setItem('sideScroll', String(side.scrollTop)), 300); }, { passive: true });
 }
 
 main().catch((e) => { console.error(e); toast(e.message, true); });

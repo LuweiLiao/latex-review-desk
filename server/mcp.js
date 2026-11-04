@@ -16,18 +16,20 @@ function buildServer(cfg, review) {
     title: '等待网页上的批注/润色请求',
     description:
       '阻塞等待用户在论文审阅网页上提交的批注或润色请求，领取后返回（状态变为“处理中”）。' +
-      '超时没有新请求时返回空列表，此时再调用一次继续等。每条请求处理完必须调用 submit_proposal 或 reply。',
+      '超时没有新请求时返回空列表，此时再调用一次继续等。每条请求处理完必须调用 submit_proposal 或 reply。' +
+      '默认只领批注和润色；公式审核 agent 传 kinds=["formula"]，只领公式审核请求。',
     inputSchema: {
+      kinds: z.array(z.enum(['comment', 'polish', 'formula'])).min(1).optional().describe('领取哪些类型，默认 ["comment","polish"]'),
       max: z.number().int().min(1).max(10).optional().describe('一次最多领取几条，默认 3'),
       timeout_sec: z.number().int().min(5).max(1800).optional().describe(`最长等待秒数，默认 ${cfg.waitTimeoutSec}`),
     },
-  }, async ({ max = 3, timeout_sec }, extra) => {
+  }, async ({ max = 3, timeout_sec, kinds }, extra) => {
     const token = extra?._meta?.progressToken;
     let n = 0;
     const onTick = token == null ? null : () => {
       extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: ++n, message: '等待网页请求' } }).catch(() => {});
     };
-    const got = await review.wait({ max, timeoutMs: (timeout_sec ?? cfg.waitTimeoutSec) * 1000, signal: extra?.signal, onTick });
+    const got = await review.wait({ max, kinds, timeoutMs: (timeout_sec ?? cfg.waitTimeoutSec) * 1000, signal: extra?.signal, onTick });
     if (!got.length) return text({ requests: [], note: '暂时没有新请求，请再次调用 wait_for_requests' });
     return text({ requests: got, projectRoot: cfg.projectRoot.replace(/\\/g, '/') });
   });
@@ -73,10 +75,14 @@ function buildServer(cfg, review) {
 
   server.registerTool('reply', {
     title: '回复一条请求（不改文字）',
-    description: '批注是提问、或判断不需要修改时，用文字回复用户。',
-    inputSchema: { id: z.string(), message: z.string() },
-  }, async ({ id, message }) => {
-    try { return text(review.reply(id, message)); } catch (e) { return fail(e); }
+    description: '批注是提问、或判断不需要修改时，用文字回复用户。公式审核请求必须带 verdict：pass 通过 / issue 有问题 / unsure 拿不准。',
+    inputSchema: {
+      id: z.string(),
+      message: z.string(),
+      verdict: z.enum(['pass', 'issue', 'unsure']).optional().describe('公式审核的结论（只对 kind=formula 的请求有效且必填）'),
+    },
+  }, async ({ id, message, verdict }) => {
+    try { return text(review.reply(id, message, verdict)); } catch (e) { return fail(e); }
   });
 
   server.registerTool('get_skill', {

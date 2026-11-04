@@ -1,8 +1,10 @@
+import { prefs } from './storage.js';
 // 右侧 PDF 视图（pdf.js），批注高亮、选区、和源码双向跳转
 import './pdfjs-global.js';
 import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
-import { api, $, OPEN } from './util.js';
-import { KEEP, findSpan, projectSource } from '../lib/text.js';
+import { api, $, OPEN, toast, projectUrl } from './util.js';
+import { KEEP, findSpan, foldChar, projectSource } from '../lib/text.js';
+import { formulaBoxes } from '../lib/mathbox.js';
 import { changeSpans } from '../lib/diff.js';
 import { state, emit, markedItems } from './state.js';
 
@@ -12,8 +14,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
 let viewer, eventBus, linkService, doc = null, loadingTask = null;
 let restored = false, posReady = false; // 刷新后是否已恢复上次位置
 const boxCache = new Map(); // key -> [{page, fx, fy, fw, fh}]
+let showFormulas = true; // 公式框常显；关掉后只在鼠标移上去时显示
 
 export function initPdf() {
+  showFormulas = prefs.getItem('formulaBoxes') !== '0';
   const container = $('#pdfContainer');
   eventBus = new EventBus();
   linkService = new PDFLinkService({ eventBus });
@@ -21,12 +25,12 @@ export function initPdf() {
   linkService.setViewer(viewer);
 
   eventBus.on('pagesinit', () => {
-    viewer.currentScaleValue = localStorage.getItem('pdfScale') || 'page-width';
+    viewer.currentScaleValue = prefs.getItem('pdfScale') || 'page-width';
     if (!restored) {
       restored = true;
       // 刷新网页：回到上次看到的页和页内位置
       try {
-        const p = JSON.parse(localStorage.getItem('pdfPos') || 'null');
+        const p = JSON.parse(prefs.getItem('pdfPos') || 'null');
         if (p?.page && p.page <= doc.numPages) requestAnimationFrame(() => scrollToPage(p.page, p.frac || 0));
       } catch { /* 记录坏了就从头看 */ }
     }
@@ -42,7 +46,7 @@ export function initPdf() {
       const pv = pageView(viewer.currentPageNumber);
       if (!pv?.div) return;
       const frac = (container.scrollTop - pv.div.offsetTop) / Math.max(1, pv.div.clientHeight);
-      localStorage.setItem('pdfPos', JSON.stringify({ page: viewer.currentPageNumber, frac: Math.max(0, Math.min(1, frac)) }));
+      prefs.setItem('pdfPos', JSON.stringify({ page: viewer.currentPageNumber, frac: Math.max(0, Math.min(1, frac)) }));
     }, 300);
   }, { passive: true });
   eventBus.on('scalechanging', ({ scale }) => {
@@ -51,10 +55,10 @@ export function initPdf() {
   });
   eventBus.on('pagesinit', () => requestAnimationFrame(() => emit('pdf-layout')));
   eventBus.on('pagechanging', ({ pageNumber }) => { $('#pageInput').value = pageNumber; });
-  eventBus.on('pagerendered', ({ pageNumber }) => drawPage(pageNumber));
+  eventBus.on('pagerendered', ({ pageNumber }) => { drawPage(pageNumber); drawFormulas(pageNumber); });
   eventBus.on('textlayerrendered', ({ pageNumber }) => drawPage(pageNumber));
 
-  const setScale = (v) => { viewer.currentScaleValue = v; localStorage.setItem('pdfScale', String(v)); };
+  const setScale = (v) => { viewer.currentScaleValue = v; prefs.setItem('pdfScale', String(v)); };
   $('#zoomIn').onclick = () => setScale(Math.min(4, viewer.currentScale * 1.15));
   $('#zoomOut').onclick = () => setScale(Math.max(0.3, viewer.currentScale / 1.15));
   $('#zoomFit').onclick = () => setScale('page-width');
@@ -82,17 +86,46 @@ export function initPdf() {
       container.scrollLeft += r1.left + fx * r1.width - ev.clientX;
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => localStorage.setItem('pdfScale', String(viewer.currentScale)), 300);
+    saveTimer = setTimeout(() => prefs.setItem('pdfScale', String(viewer.currentScale)), 300);
   }, { passive: false });
   $('#pageInput').onchange = (e) => { viewer.currentPageNumber = Math.max(1, Math.min(doc?.numPages || 1, +e.target.value)); };
-  $('#showMarks').checked = localStorage.getItem('showAllMarks') === '1';
-  $('#showMarks').onchange = (e) => { localStorage.setItem('showAllMarks', e.target.checked ? '1' : '0'); emit('marks-changed'); };
+  $('#showMarks').checked = prefs.getItem('showAllMarks') === '1';
+  $('#showMarks').onchange = (e) => { prefs.setItem('showAllMarks', e.target.checked ? '1' : '0'); emit('marks-changed'); };
+
+  $('#showFormulas').checked = showFormulas;
+  $('#showFormulas').onchange = (e) => setFormulaBoxes(e.target.checked);
 
   container.addEventListener('mouseup', (ev) => {
     if (ev.detail >= 2) return; // 双击留给跳转
     setTimeout(() => captureSelection(ev), 10);
   });
+
+  // 公式框不接鼠标（不挡拖选文字），悬停和单击按坐标判断
+  let hoverRaf = 0, hoverEl = null;
+  container.addEventListener('mousemove', (ev) => {
+    if (ev.buttons || hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      const f = formulaAt(ev.clientX, ev.clientY);
+      const el = f ? f.layer.children[f.index] : null;
+      if (el === hoverEl) return;
+      hoverEl?.classList.remove('hover');
+      el?.classList.add('hover');
+      hoverEl = el;
+      container.classList.toggle('on-formula', !!el);
+    });
+  });
+  let clickTimer = null;
+  container.addEventListener('click', (ev) => {
+    if (ev.button !== 0 || ev.detail !== 1 || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    if (!window.getSelection()?.isCollapsed) return; // 拖选文字不算点公式
+    const f = formulaAt(ev.clientX, ev.clientY);
+    if (!f) { if (selectedFormula) selectFormula(null); return; }
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => pickFormula(f, ev.clientX, ev.clientY), 230); // 等一下，双击就不算单击
+  });
   container.addEventListener('dblclick', (ev) => {
+    clearTimeout(clickTimer);
     const hit = pointOnPage(ev.clientX, ev.clientY);
     if (!hit) return;
     window.getSelection()?.removeAllRanges();
@@ -110,9 +143,14 @@ export function initPdf() {
 }
 
 export async function loadPdf() {
-  if (!state.pdf) return;
+  if (!state.pdf) {
+    $('#pdfViewer').replaceChildren();
+    $('#pageCount').textContent = '0';
+    $('#zoomLabel').textContent = '暂无 PDF';
+    return;
+  }
   const keep = doc ? { page: viewer.currentPageNumber, scale: viewer.currentScaleValue, top: $('#pdfContainer').scrollTop } : null;
-  const url = `/pdf?v=${Math.round(state.pdf.mtime)}`;
+  const url = projectUrl(`/pdf?v=${Math.round(state.pdf.mtime)}`);
   const oldTask = loadingTask;
   const task = pdfjsLib.getDocument({
     url,
@@ -120,6 +158,7 @@ export async function loadPdf() {
     cMapPacked: true,
     standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
     wasmUrl: '/vendor/pdfjs/wasm/',
+    fontExtraProperties: true, // 要字体名来认公式
     iccUrl: '/vendor/pdfjs/iccs/',
   });
   loadingTask = task;
@@ -128,6 +167,8 @@ export async function loadPdf() {
   doc = newDoc;
   boxCache.clear();
   changeCache.clear();
+  formulaCache.clear();
+  selectedFormula = null;
   viewer.setDocument(doc);
   linkService.setDocument(doc);
   $('#pageCount').textContent = doc.numPages;
@@ -249,9 +290,11 @@ function pageText(n) {
         const box = { fx: (e - x0) / (x1 - x0), fy: (y1 - f - fontH * 0.85) / (y1 - y0), fw: item.width / (x1 - x0), fh: (fontH * 1.15) / (y1 - y0) };
         const all = [...item.str];
         all.forEach((ch, k) => {
-          if (!KEEP.test(ch)) return;
-          chars += ch.toLowerCase();
-          map.push({ page: n, box, k, len: all.length });
+          for (const f of foldChar(ch)) {
+            if (!KEEP.test(f)) continue;
+            chars += f;
+            map.push({ page: n, box, k, len: all.length });
+          }
         });
       }
       return { chars, map };
@@ -365,11 +408,11 @@ function changeRects(c) {
     if (!s.exact) return spanRects(s.map, s.r[0], s.r[1]);
     const proj = projectSource(c.replacement);
     const out = [];
-    for (const span of changeSpans(c.original, c.replacement).ins) {
+    changeSpans(c.original, c.replacement).ins.forEach((span, g) => {
       let k0 = -1, k1 = -1;
       proj.map.forEach((off, k) => { if (off >= span.from && off < span.to) { if (k0 < 0) k0 = k; k1 = k; } });
-      if (k0 >= 0) out.push(...spanRects(s.map, s.r[0] + k0, s.r[0] + k1 + 1));
-    }
+      if (k0 >= 0) out.push(...spanRects(s.map, s.r[0] + k0, s.r[0] + k1 + 1).map((r) => ({ ...r, g }))); // g：第几处改动
+    });
     return out;
   })().catch(() => []));
   return changeCache.get(key);
@@ -384,8 +427,30 @@ async function boxesFor(it) {
   // 选区矩形只在同一版 PDF 上有效，编译后重新按文字找
   if (it.anchor.rects?.length && it.anchor.pdfMtime && state.pdf && Math.abs(it.anchor.pdfMtime - state.pdf.mtime) < 1) return it.anchor.rects;
   const key = `${it.id}:${it.anchor.file}:${it.anchor.lineStart}:${it.anchor.quote.length}:${state.pdf?.mtime}`;
-  if (!boxCache.has(key)) boxCache.set(key, locate(it.anchor.file, linesOf(it), it.anchor.quote, it.anchor.page).catch(() => []));
+  if (!boxCache.has(key)) boxCache.set(key, (it.kind === 'formula' ? formulaRects(it) : locate(it.anchor.file, linesOf(it), it.anchor.quote, it.anchor.page)).catch(() => []));
   return boxCache.get(key);
+}
+
+// 公式审核的条目：用 synctex 找到页和高度，取那里的独立公式框（公式文字和源码对不上，不能按文字找）
+async function formulaRects(it) {
+  const { lineStart: a, lineEnd: b } = it.anchor;
+  const lines = [...new Set([Math.min(b, a + 1), Math.round((a + b) / 2), Math.max(a, b - 1)])];
+  const all = await Promise.all(lines.map((l) => limited(() => api('GET', `/api/synctex/forward?file=${encodeURIComponent(it.anchor.file)}&line=${l}`)).catch(() => [])));
+  const hits = all.filter((bs) => bs.length && bs.length <= 12).flat().filter((x) => x.W > 0 && x.H > 0);
+  if (!hits.length) return [];
+  const page = hits.map((x) => x.page).sort((m, n) => m - n)[hits.length >> 1];
+  const pdfPage = await doc.getPage(page);
+  const ys = hits.filter((x) => x.page === page).map((x) => boxToFrac({ pdfPage }, x));
+  const top = Math.min(...ys.map((r) => r.fy)), bot = Math.max(...ys.map((r) => r.fy + r.fh));
+  const boxes = (await formulasOf(page)).filter((f) => f.kind === 'display');
+  let best = null, bestScore = -Infinity;
+  for (const f of boxes) {
+    const overlap = Math.min(bot, f.fy + f.fh) - Math.max(top, f.fy);
+    const score = overlap > 0 ? overlap : -Math.abs((f.fy + f.fh / 2) - (top + bot) / 2);
+    if (score > bestScore) { best = f; bestScore = score; }
+  }
+  if (!best || bestScore < -0.05) return ys.map((r) => ({ ...r, page }));
+  return [{ page, fx: best.fx, fy: best.fy, fw: best.fw, fh: best.fh }];
 }
 
 function hlLayer(pv) {
@@ -398,6 +463,130 @@ function hlLayer(pv) {
   return layer;
 }
 
+// ---- 公式框 ----
+// 按字体和字认出公式，在网页上画框（不改 PDF）。字体名要等页面画过、字体加载后才拿得到。
+
+const formulaCache = new Map(); // `${mtime}:${page}` -> Promise<boxes>
+let selectedFormula = null; // { page, index }
+
+function formulasOf(n) {
+  const key = `${state.pdf?.mtime}:${n}`;
+  if (!formulaCache.has(key)) {
+    const job = (async () => {
+      const page = await doc.getPage(n);
+      const [x0, y0, x1, y1] = page.view;
+      const tc = await page.getTextContent();
+      let missing = 0;
+      const items = tc.items.filter((it) => typeof it.str === 'string').map((it) => {
+        const [, b, , d, e, f] = it.transform;
+        const fh = Math.hypot(b, d) || it.height || 10;
+        let font = '';
+        if (page.commonObjs.has(it.fontName)) font = page.commonObjs.get(it.fontName)?.name || '';
+        else missing++;
+        return { str: it.str, font, x: (e - x0) / (x1 - x0), y: (y1 - f - fh * 0.85) / (y1 - y0), w: it.width / (x1 - x0), h: (fh * 1.15) / (y1 - y0) };
+      });
+      if (missing) formulaCache.delete(key); // 字体还没加载完，下次重算
+      return formulaBoxes(items).map((b) => ({ ...b, page: n }));
+    })().catch(() => []);
+    formulaCache.set(key, job);
+  }
+  return formulaCache.get(key);
+}
+
+async function drawFormulas(n) {
+  const pv = pageView(n);
+  if (!pv?.div || !doc) return;
+  const boxes = await formulasOf(n);
+  if (!pv.div.isConnected) return;
+  let layer = pv.div.querySelector('.fx-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'fx-layer';
+    pv.div.append(layer);
+  }
+  layer.classList.toggle('hover-only', !showFormulas);
+  layer.boxes = boxes;
+  layer.replaceChildren(...boxes.map((b, i) => {
+    const d = document.createElement('div');
+    d.className = `fbox ${b.kind}${selectedFormula?.page === n && selectedFormula.index === i ? ' selected' : ''}`;
+    Object.assign(d.style, { left: `${b.fx * 100}%`, top: `${b.fy * 100}%`, width: `${b.fw * 100}%`, height: `${b.fh * 100}%` });
+    return d;
+  }));
+}
+
+export function setFormulaBoxes(on) {
+  showFormulas = !!on;
+  prefs.setItem('formulaBoxes', on ? '1' : '0');
+  document.querySelectorAll('.fx-layer').forEach((l) => l.classList.toggle('hover-only', !showFormulas));
+}
+
+// 鼠标下的公式（重叠时取最小的框）
+function formulaAt(cx, cy) {
+  const pageEl = document.elementFromPoint(cx, cy)?.closest('.page');
+  const layer = pageEl?.querySelector('.fx-layer');
+  if (!layer?.boxes?.length) return null;
+  const r = layer.getBoundingClientRect();
+  const fx = (cx - r.left) / r.width, fy = (cy - r.top) / r.height;
+  let best = -1;
+  layer.boxes.forEach((b, i) => {
+    if (fx < b.fx || fx > b.fx + b.fw || fy < b.fy || fy > b.fy + b.fh) return;
+    if (best < 0 || b.fw * b.fh < layer.boxes[best].fw * layer.boxes[best].fh) best = i;
+  });
+  return best < 0 ? null : { page: +pageEl.dataset.pageNumber, index: best, box: layer.boxes[best], layer };
+}
+
+function selectFormula(f) {
+  document.querySelectorAll('.fbox.selected').forEach((el) => el.classList.remove('selected'));
+  selectedFormula = f ? { page: f.page, index: f.index } : null;
+  if (f) pageView(f.page)?.div.querySelector('.fx-layer')?.children[f.index]?.classList.add('selected');
+}
+
+// 单击公式：找到源码里那一段，左侧选中，弹出批注 / 润色菜单
+async function pickFormula(f, cx, cy) {
+  selectFormula(f);
+  const pv = pageView(f.page);
+  const [x0, y0, x1, y1] = pv.pdfPage.view;
+  const b = f.box;
+  const x = (b.fx + b.fw / 2) * (x1 - x0), y = (b.fy + b.fh / 2) * (y1 - y0);
+  const r = await api('GET', `/api/synctex/backward?page=${f.page}&x=${x}&y=${y}`).catch(() => null);
+  const loc = r && await api('POST', '/api/formula', { file: r.file, line: r.line, kind: b.kind, before: b.before, after: b.after }).catch(() => null);
+  if (!loc) return toast('没找到这个公式对应的源码');
+  emit('sync-to-source', { file: loc.file, line: loc.line, from: loc.from, to: loc.to });
+  const rect = pv.div.querySelector('.fx-layer')?.children[f.index]?.getBoundingClientRect();
+  emit('selection', {
+    x: rect ? rect.left : cx, y: (rect ? rect.bottom : cy) + 6,
+    quote: loc.quote, formula: true,
+    anchor: { source: 'source', file: loc.file, from: loc.from, to: loc.to, quote: loc.quote },
+  });
+}
+
+// 高亮里的公式：首尾两块高亮之间（按阅读顺序）的公式框，或和高亮叠在一起的，一起框上
+// 中心在同一行就比左右，否则比上下（都用中心，公式框比正文高，用上沿比会错）
+const readOrder = (a, b) => {
+  const dy = a.fy + a.fh / 2 - (b.fy + b.fh / 2);
+  return Math.abs(dy) < Math.max(a.fh, b.fh) * 0.4 ? a.fx - b.fx : dy;
+};
+
+function formulasWithin(rects, formulas, n, morePrev, moreNext) {
+  const on = rects.filter((r) => r.page === n);
+  if (!on.length && !(morePrev && moreNext)) return [];
+  const sorted = [...on].sort(readOrder);
+  const first = sorted[0], last = sorted[sorted.length - 1];
+  const overlaps = (f) => on.some((r) => f.fx < r.fx + r.fw && r.fx < f.fx + f.fw && f.fy < r.fy + r.fh && r.fy < f.fy + f.fh);
+  return formulas.filter((f) => {
+    if (overlaps(f)) return true;
+    const c = { fx: f.fx + f.fw / 2, fy: f.fy + f.fh / 2, fh: 0.001 };
+    const afterFirst = morePrev || !first || readOrder(first, c) < 0;
+    const beforeLast = moreNext || !last || readOrder(c, last) < 0;
+    return on.length > 1 || morePrev || moreNext ? afterFirst && beforeLast : false;
+  }).map((f) => ({ page: n, fx: f.fx, fy: f.fy, fw: f.fw, fh: f.fh }));
+}
+
+function withFormulas(rects, formulas, n) {
+  const pages = rects.map((r) => r.page);
+  return formulasWithin(rects, formulas, n, pages.some((p) => p < n), pages.some((p) => p > n));
+}
+
 const drawGen = new Map();
 
 async function drawPage(n) {
@@ -408,11 +597,20 @@ async function drawPage(n) {
   const gen = (drawGen.get(n) || 0) + 1;
   drawGen.set(n, gen);
   const near = items.filter((it) => !it.anchor.page || Math.abs(it.anchor.page - n) <= 3);
-  const [boxes, chg] = await Promise.all([Promise.all(near.map((it) => boxesFor(it))), Promise.all((state.changes || []).map(changeRects))]);
+  const [boxes, chg, formulas] = await Promise.all([Promise.all(near.map((it) => boxesFor(it))), Promise.all((state.changes || []).map(changeRects)), formulasOf(n)]);
   if (drawGen.get(n) !== gen) return;
   const parts = [];
-  (state.changes || []).forEach((c, i) => { for (const r of chg[i]) if (r.page === n) parts.push({ chg: c, r }); });
-  near.forEach((it, i) => { for (const r of boxes[i]) if (r.page === n) parts.push({ it, r }); });
+  (state.changes || []).forEach((c, i) => {
+    for (const r of chg[i]) if (r.page === n) parts.push({ chg: c, r });
+    // 每处改动单独看，免得把两处改动之间没改的公式也标黄
+    const groups = new Map();
+    for (const r of chg[i]) { const k = r.g ?? -1; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+    for (const rs of groups.values()) for (const r of withFormulas(rs, formulas, n)) parts.push({ chg: c, r });
+  });
+  near.forEach((it, i) => {
+    for (const r of boxes[i]) if (r.page === n) parts.push({ it, r });
+    if (it.kind !== 'formula') for (const r of withFormulas(boxes[i], formulas, n)) parts.push({ it, r });
+  });
   layer.replaceChildren(...parts.map(({ it, chg: c, r }) => {
     const d = document.createElement('div');
     if (c) {

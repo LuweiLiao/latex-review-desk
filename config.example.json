@@ -1,6 +1,6 @@
 {
   "port": 4317,
-  "projectRoot": "D:/path/to/your/latex-project",
+  "projectRoot": ".",
   "mainTex": "main.tex",
   "pdf": "main.pdf",
   "sourceDirs": ["chapters"],

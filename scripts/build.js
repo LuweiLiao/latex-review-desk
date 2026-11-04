@@ -10,6 +10,7 @@ const vendor = path.join(root, 'web', 'vendor', 'pdfjs');
 
 fs.rmSync(vendor, { recursive: true, force: true });
 fs.mkdirSync(vendor, { recursive: true });
+fs.copyFileSync(path.join(pdfjs, 'LICENSE'), path.join(vendor, 'LICENSE'));
 fs.copyFileSync(path.join(pdfjs, 'build', 'pdf.worker.min.mjs'), path.join(vendor, 'pdf.worker.min.mjs'));
 for (const d of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) fs.cpSync(path.join(pdfjs, d), path.join(vendor, d), { recursive: true });
 fs.cpSync(path.join(pdfjs, 'web', 'images'), path.join(vendor, 'images'), { recursive: true });
@@ -21,7 +22,7 @@ await build({
   format: 'esm',
   target: 'es2022',
   outfile: path.join(root, 'web', 'dist', 'app.js'),
-  sourcemap: true,
+  sourcemap: !process.argv.includes('--minify'),
   minify: process.argv.includes('--minify'),
   logLevel: 'info',
 });

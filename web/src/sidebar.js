@@ -1,5 +1,6 @@
+import { prefs } from './storage.js';
 // 右侧批注列表：待确认的方案直接在卡片里显示修订对照，可就地接受、驳回、重做
-import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN } from './util.js';
+import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN, VERDICT } from './util.js';
 import { state, emit, on } from './state.js';
 import { diffWords } from '../lib/diff.js';
 import { itemAnchor, pageOffset, pdfReady } from './pdfview.js';
@@ -11,20 +12,20 @@ const openBoxes = new Map(); // 正在填写的回复框：id -> 文本，重绘
 
 export function initSidebar() {
   // “全部”已去掉，旧的记录按“未完成”处理
-  const sf = localStorage.getItem('statusFilter');
+  const sf = prefs.getItem('statusFilter');
   $('#statusFilter').value = sf && sf !== 'all' ? sf : 'open';
   if (!$('#statusFilter').value) $('#statusFilter').value = 'open';
-  $('#sortOrder').value = localStorage.getItem('sortOrder') || 'pos';
-  $('#statusFilter').onchange = (e) => { localStorage.setItem('statusFilter', e.target.value); renderSidebar(); };
-  $('#sortOrder').onchange = (e) => { localStorage.setItem('sortOrder', e.target.value); renderSidebar(); };
-  $('#chapterFilter').onchange = (e) => { localStorage.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
+  $('#sortOrder').value = prefs.getItem('sortOrder') || 'pos';
+  $('#statusFilter').onchange = (e) => { prefs.setItem('statusFilter', e.target.value); renderSidebar(); };
+  $('#sortOrder').onchange = (e) => { prefs.setItem('sortOrder', e.target.value); renderSidebar(); };
+  $('#chapterFilter').onchange = (e) => { prefs.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
   initResize();
   initRail();
 }
 
 function initResize() {
   const side = $('#sidebar');
-  const saved = localStorage.getItem('sideWidth');
+  const saved = prefs.getItem('sideWidth');
   if (saved) side.style.width = saved;
   $('#sideSplitter').addEventListener('mousedown', (ev) => {
     ev.preventDefault();
@@ -32,7 +33,7 @@ function initResize() {
     const move = (e) => { side.style.width = `${Math.min(innerWidth * 0.6, Math.max(280, innerWidth - e.clientX))}px`; };
     const up = () => {
       $('#sideSplitter').classList.remove('drag');
-      localStorage.setItem('sideWidth', side.style.width);
+      prefs.setItem('sideWidth', side.style.width);
       removeEventListener('mousemove', move);
       removeEventListener('mouseup', up);
     };
@@ -43,7 +44,7 @@ function initResize() {
 
 // 当前按章筛选到的文件；null 表示全部章节
 export function scopeFile() {
-  const v = localStorage.getItem('chapterFilter') || 'follow';
+  const v = prefs.getItem('chapterFilter') || 'follow';
   if (v === 'all') return null;
   if (v === 'follow') return state.openFile;
   return state.files.includes(v) ? v : state.openFile;
@@ -53,7 +54,7 @@ const chapterName = (f) => state.fileTitles[f] || f.replace(/^.*\//, '');
 
 function fillChapterFilter() {
   const sel = $('#chapterFilter');
-  const v = localStorage.getItem('chapterFilter') || 'follow';
+  const v = prefs.getItem('chapterFilter') || 'follow';
   const proposed = (f) => state.items.filter((it) => it.status === 'proposed' && (!f || it.anchor.file === f)).length;
   const open = (f) => state.items.filter((it) => OPEN.has(it.status) && it.anchor.file === f).length;
   const label = (f) => { const p = proposed(f), o = open(f); return `${chapterName(f)}${p ? `（待确认 ${p}）` : o ? `（${o}）` : ''}`; };
@@ -69,8 +70,13 @@ function fillChapterFilter() {
 function visible() {
   const f = $('#statusFilter').value;
   const scope = scopeFile();
-  const unfinished = (it) => ['pending', 'claimed', 'proposed'].includes(it.status) || (it.status === 'replied' && !it.job);
-  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter((it) => (f === 'open' ? unfinished(it) : it.status === f || (f === 'pending' && it.status === 'claimed')));
+  const unfinished = (it) => ['pending', 'claimed', 'proposed'].includes(it.status) || (it.status === 'replied' && (it.kind === 'formula' ? it.verdict !== 'pass' : !it.job));
+  const match = (it) => {
+    if (f === 'open') return unfinished(it);
+    if (f === 'formula') return it.kind === 'formula' && it.status !== 'rejected';
+    return it.status === f || (f === 'pending' && it.status === 'claimed');
+  };
+  let list = state.items.filter((it) => !scope || it.anchor.file === scope).filter(match);
   if ($('#sortOrder').value === 'time') list = list.sort((a, b) => b.updatedAt - a.updatedAt);
   else list = list.sort(byPosition);
   return list;
@@ -115,7 +121,10 @@ function card(it, inRail = false) {
     it.conflict && !it.stale && h('span', { class: 'tag stale' }, '方案冲突'),
     it.anchor.approximate && h('span', { class: 'tag approx', title: 'PDF 选区没能逐字对上源码，引用的是附近的源码' }, '近似'),
     it.kind === 'polish' && h('span', { class: 'tag skill' }, it.skill),
-    it.job && h('span', { class: 'tag job-tag', title: `逐段润色 ${it.job.id}` }, `第 ${it.job.index}/${it.job.total} 段`),
+    it.ai?.agentName && h('span', { class: 'tag', title: it.ai.model || '' }, it.ai.agentName),
+    it.kind === 'formula' && h('span', { class: 'tag formula-tag' }, '公式审核'),
+    it.kind === 'formula' && it.verdict && h('span', { class: `tag verdict-${it.verdict}` }, VERDICT[it.verdict]),
+    it.job && h('span', { class: 'tag job-tag', title: `${it.kind === 'formula' ? '公式审核' : '逐段润色'} ${it.job.id}` }, `第 ${it.job.index}/${it.job.total} ${it.kind === 'formula' ? '个' : '段'}`),
     duplicatesOf(it).length > 0 && h('span', { class: 'tag stale', title: '同一段落还有其他未完成的请求，保留一条即可' }, `与 ${duplicatesOf(it).join('、')} 重复`),
     h('span', {}, [it.anchor.page ? `第 ${it.anchor.page} 页` : '', it.anchor.section].filter(Boolean).join(' · ')),
   );
@@ -124,7 +133,7 @@ function card(it, inRail = false) {
   if (hasProposal0) head.append(...[!inRail && h('span', { class: 'spacer' }), h('button', {
     class: 'btn link mode-toggle',
     title: '切换左右对照 / 单栏修订',
-    onclick: () => { localStorage.setItem('sideDiffMode', diffMode() === 'inline' ? 'compare' : 'inline'); renderSidebar(); },
+    onclick: () => { prefs.setItem('sideDiffMode', diffMode() === 'inline' ? 'compare' : 'inline'); renderSidebar(); },
   }, diffMode() === 'inline' ? '对照' : '修订')].filter(Boolean));
   const hasProposal = (it.status === 'proposed' || it.status === 'accepted') && it.proposal;
   // 只显示最近一轮（上次发回重做之后）的对话，旧的“无需修改”之类不再挂着
@@ -140,7 +149,7 @@ function card(it, inRail = false) {
   },
     head,
     // 有方案时修订对照里已经包含原文，不再重复显示引用
-    !hasProposal && h('div', { class: 'quote' }, it.anchor.pdfText || it.anchor.quote),
+    !hasProposal && h('div', { class: `quote${it.kind === 'formula' ? ' tex' : ''}` }, it.anchor.pdfText || it.anchor.quote),
     it.comment && h('div', { class: 'comment' }, h('span', { class: 'who' }, '意见：'), it.comment),
     hasProposal && diffSlot(it),
     hasProposal && notes(it),
@@ -153,7 +162,7 @@ function card(it, inRail = false) {
 }
 
 // 默认左右对照，可切到单栏修订；选择记在本地
-const diffMode = () => localStorage.getItem('sideDiffMode') || 'compare';
+const diffMode = () => prefs.getItem('sideDiffMode') || 'compare';
 const render = (hk, opts) => (diffMode() === 'inline' ? inlineDiff(hk, opts) : compareDiff(hk, opts));
 
 // 待确认方案里被撤掉的改动块：id -> { key, set }，方案更新后自动作废
@@ -263,7 +272,7 @@ function replyBox(it, text = '') {
   const ta = h('textarea', { placeholder: '哪里不满意、想怎么改（可不填，只换 skill 也行）', oninput: () => openBoxes.set(it.id, ta.value) });
   ta.value = text;
   openBoxes.set(it.id, text);
-  const sel = it.kind === 'polish' || it.status !== 'replied' ? skillSelect(it.skill || localStorage.getItem('lastSkill') || state.defaultSkill) : null;
+  const sel = it.kind === 'polish' || it.status !== 'replied' ? skillSelect(it.skill || prefs.getItem('lastSkill') || state.defaultSkill) : null;
   const close = () => { openBoxes.delete(it.id); box.remove(); };
   const box = h('div', { class: 'reply-box' },
     sel && h('label', { class: 'muted' }, '用 skill：'), sel, ta,
@@ -271,7 +280,7 @@ function replyBox(it, text = '') {
       h('button', { class: 'btn small primary', onclick: guard(async () => {
         const skill = sel?.value;
         if (!ta.value.trim() && (!skill || skill === it.skill) && it.status !== 'rejected') return toast('写一句意见，或换一个 skill');
-        if (skill) localStorage.setItem('lastSkill', skill);
+        if (skill) prefs.setItem('lastSkill', skill);
         openBoxes.delete(it.id);
         await api('POST', `/api/items/${it.id}/requeue`, { message: ta.value, skill });
         toast('已发回 agent 重做');
@@ -440,6 +449,7 @@ function miniCard(it) {
       h('span', { class: `tag ${it.status}` }, STATUS[it.status]),
       (it.stale || it.conflict) && h('span', { class: 'tag stale' }, it.stale ? '原文已改' : '冲突'),
       it.kind === 'polish' ? h('span', { class: 'tag skill' }, it.skill) : h('span', { class: 'tag' }, '批注'),
+      it.ai?.agentName && h('span', { class: 'tag', title: it.ai.model || '' }, it.ai.agentName),
       it.job && h('span', { class: 'muted' }, `${it.job.index}/${it.job.total}`),
       h('span', { class: 'spacer' }),
       ...acts),

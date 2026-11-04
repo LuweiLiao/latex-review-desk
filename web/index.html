@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>论文审阅台</title>
   <link rel="stylesheet" href="/vendor/pdfjs/pdf_viewer.css">
@@ -9,6 +10,7 @@
 </head>
 <body>
   <header id="topbar">
+    <button id="toggleProjects" class="btn small" title="收起项目和文件" aria-label="收起项目和文件" aria-expanded="true" aria-controls="projectPanel">☰</button>
     <div class="brand">论文审阅台</div>
     <nav class="tabs">
       <button data-mode="read" class="active">阅读</button>
@@ -17,7 +19,10 @@
     <button id="confirmChangesBtn" class="chg-btn" hidden title="已写入的修改在源码和 PDF 上标黄；看过没问题点这里，去掉标黄">确认修改 <span class="count"></span></button>
     <div id="dirtyBanner" class="banner" hidden></div>
     <div class="spacer"></div>
+    <select id="activeAgentSelect" title="默认 Agent；任务可在设置中分别指定" aria-label="默认 Agent"></select>
+    <button id="apiSettingsBtn" class="btn small">Agent 设置</button>
     <div id="agentStatus" class="pill" title="后台 agent 状态">agent 离线</div>
+    <div id="formulaAgentStatus" class="pill" hidden></div>
     <select id="recipeSelect" title="编译配方；按 Ctrl+S 保存并用这个配方编译"></select>
     <button id="compileBtn" class="btn" title="Ctrl+S">重新编译</button>
     <button id="stopBtn" class="btn danger" hidden>终止</button>
@@ -25,11 +30,30 @@
   </header>
 
   <main id="main">
+    <aside id="projectPanel" aria-label="项目和文件">
+      <div class="project-heading"><b>项目</b><button id="openProjectBtn" class="btn small">打开文件夹</button></div>
+      <label class="sr-only" for="projectSelect">当前项目</label>
+      <select id="projectSelect"></select>
+      <div id="projectRoot" class="project-root"></div>
+      <div class="project-import">
+        <button id="uploadProjectBtn" class="btn small">导入文件夹副本</button>
+        <input id="projectUpload" type="file" webkitdirectory multiple hidden>
+        <span id="importStatus" role="status">也可将文件夹拖到这里</span>
+      </div>
+      <div class="tree-heading"><b>文件</b><button id="projectSettingsBtn" class="btn small">项目设置</button><button id="foldFilesBtn" class="btn small" title="收起所有目录">收起</button></div>
+      <div id="projectFiles" role="tree" aria-label="项目文件"></div>
+      <div class="project-footer">
+        <button id="texEnvironmentBtn" class="environment-status">TeX 环境：检查中…</button>
+        <button id="apiRunBtn" class="btn small">Agent 任务设置</button>
+        <div id="apiTaskStatus" role="status">尚无 API 任务</div>
+      </div>
+    </aside>
     <section id="readView" class="view">
       <div id="srcPane" class="pane">
         <div class="pane-bar">
           <select id="fileSelect"></select>
           <button class="btn small" id="polishChapterBtn" title="润色当前这一章（整个文件）；默认逐段，一段一段交给 agent">润色本章</button>
+          <button class="btn small" id="formulaReviewBtn" title="从头到尾一个一个审核独立公式：符号定义、维数、上下标、推导衔接、编号引用">审核公式</button>
           <span id="saveStatus" class="save-status"></span>
           <button class="btn small" id="toPdfBtn" title="跳到 PDF 对应位置（也可 Ctrl+点击源码）">→ PDF</button>
         </div>
@@ -46,8 +70,9 @@
           <span class="sep"></span>
           <input id="pageInput" type="number" min="1" value="1"> / <span id="pageCount">-</span>
           <span class="spacer"></span>
+          <label class="chk" title="不勾选时只在鼠标移到公式上时显示框；单击公式可批注或润色"><input type="checkbox" id="showFormulas"> 公式框</label>
           <label class="chk" title="不勾选时只高亮当前选中的那条"><input type="checkbox" id="showMarks"> 显示全部批注</label>
-          <span class="hint">Ctrl+滚轮缩放 · 双击跳到源码</span>
+          <span class="hint" title="Ctrl+滚轮缩放 · 单击公式批注 · 双击跳到源码">Ctrl+滚轮缩放 · 单击公式 · 双击跳源码</span>
         </div>
         <div id="pdfContainer"><div id="pdfViewer" class="pdfViewer"></div></div>
       </div>
@@ -77,6 +102,7 @@
           <option value="pending">待处理</option>
           <option value="proposed">待确认</option>
           <option value="replied">已回复</option>
+          <option value="formula">公式审核</option>
           <option value="rejected">已驳回</option>
           <option value="accepted">已接受</option>
         </select>
@@ -94,6 +120,49 @@
   </main>
 
   <div id="selMenu" class="popover" hidden></div>
+  <dialog id="projectDialog" class="workspace-dialog" aria-labelledby="projectDialogTitle">
+    <form id="openProjectForm">
+      <div class="dialog-heading"><h2 id="projectDialogTitle">打开本地原文件夹</h2><button type="button" class="btn small" data-close-dialog>关闭</button></div>
+      <p class="muted">直接使用原目录，接受的修改会写回该目录。需要副本时，请用“导入文件夹副本”。</p>
+      <label class="field-label">项目名称（可不填）<input id="projectName" autocomplete="off"></label>
+      <label class="field-label">本地文件夹路径<input id="folderPath" placeholder="例如 D:\论文\我的项目" autocomplete="off" required></label>
+      <div class="dialog-actions"><button type="button" id="browseFolderBtn" class="btn">系统选择文件夹…</button><button type="submit" class="btn primary">打开原文件夹</button></div>
+      <div id="projectDialogStatus" class="dialog-status" role="status"></div>
+    </form>
+  </dialog>
+  <dialog id="apiDialog" class="workspace-dialog" aria-labelledby="apiDialogTitle">
+    <form id="apiSettingsForm">
+      <div class="dialog-heading"><h2 id="apiDialogTitle">Agent 与模型配置</h2><button type="button" class="btn small" data-close-dialog>关闭</button></div>
+      <div class="agent-config-layout"><aside class="agent-config-list"><b>已保存的 Agent</b><div id="agentList"></div><button type="button" id="addAgentBtn" class="btn">＋ 新增 Agent</button></aside><div class="agent-config-fields">
+      <label class="field-label">Agent 名称<input id="agentName" required placeholder="例如：中文润色、公式审核"></label>
+      <label class="field-label">接口格式<select id="apiFormat"><option value="openai">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option><option value="gemini">Gemini</option></select></label>
+      <label class="field-label">Base URL<input id="apiBaseUrl" type="url" placeholder="https://api.example.com/v1" required></label>
+      <label class="field-label">API Key<input id="apiKey" type="password" autocomplete="new-password" placeholder="输入密钥"></label>
+      <div id="apiKeyHint" class="muted"></div>
+      <label class="field-label">模型<input id="apiModel" placeholder="模型名称" required></label>
+      <label class="field-label">同时处理数量<select id="apiConcurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+      <label class="field-label">Agent 提示词<textarea id="agentSystemPrompt" rows="4" placeholder="这个 Agent 的职责、表达要求或审核重点"></textarea></label>
+      <label class="chk"><input id="apiEnabled" type="checkbox"> 启用 API，自动处理新的待办和重新提交的任务</label>
+      <p class="muted">默认使用 basic-polish 润色规则。修改方案仍需在审阅台确认后才会写入源码。</p>
+      <div class="dialog-actions"><button type="button" id="testApiBtn" class="btn">测试连接</button><button type="submit" class="btn primary">保存 Agent</button><button type="button" id="setDefaultAgentBtn" class="btn">设为默认</button><button type="button" id="deleteAgentBtn" class="btn danger">删除</button></div>
+      </div></div>
+      <fieldset class="agent-assignments"><legend>按任务选择 Agent</legend><label>正文润色<select id="polishAgentSelect"></select></label><label>批注回复<select id="commentAgentSelect"></select></label><label>公式审核<select id="formulaAgentSelect"></select></label><button type="button" id="saveAgentAssignmentsBtn" class="btn">保存任务分工</button></fieldset>
+      <div id="apiSettingsStatus" class="dialog-status" role="status"></div>
+    </form>
+  </dialog>
+  <dialog id="projectSettingsDialog" class="workspace-dialog" aria-labelledby="projectSettingsTitle">
+    <form id="projectSettingsForm">
+      <div class="dialog-heading"><h2 id="projectSettingsTitle">项目设置</h2><button type="button" class="btn small" data-close-dialog>关闭</button></div>
+      <label class="field-label">项目名称<input id="projectSettingsName" required></label>
+      <label class="field-label">主文件<select id="projectMainTex"></select></label>
+      <p id="mainTexHint" class="muted"></p>
+      <label class="field-label">默认编译配方<select id="projectDefaultRecipe"></select></label>
+      <label class="field-label">写作要求<textarea id="projectWritingRules" rows="6" placeholder="例如：用平常自然的词语，遵循控制科学与工程的用词习惯。"></textarea></label>
+      <div class="dialog-actions"><button type="submit" class="btn primary">保存项目设置</button></div>
+      <div id="projectSettingsStatus" class="dialog-status" role="status"></div>
+    </form>
+  </dialog>
+  <dialog id="texDialog" class="workspace-dialog" aria-labelledby="texDialogTitle"><div class="dialog-heading"><h2 id="texDialogTitle">TeX 环境</h2><button class="btn small" data-close-dialog>关闭</button></div><div id="texEnvironmentDetails"></div><button id="refreshEnvironmentBtn" class="btn">重新检查</button></dialog>
   <div id="modal" class="modal" hidden><div class="modal-box"><button class="modal-close">×</button><div class="modal-body"></div></div></div>
   <div id="toasts"></div>
 

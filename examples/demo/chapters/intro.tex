@@ -12,3 +12,18 @@
 式中，$x$ 为状态量，$u$ 为控制输入。我们通过对控制器进行设计，从而实现了对系统状态的精确跟踪。
 
 总而言之，本节所述方法在理论上是可行的，在实践中也是有效的，具有重要的意义和价值。
+
+\section{模型}
+
+设质量为 $m$、阻尼系数为 $c_\xi$、刚度为 $k$，取广义坐标 $\bm q=[x,\theta]^{\mathrm T}$，则动能为 $T=\frac{1}{2}m\dot x^2$。
+系统的运动方程可写为
+\begin{align}
+  m\ddot x + c_\xi\dot x + k x &= F , \label{eq:motion} \\
+  J\ddot\theta + \beta\dot\theta &= \tau ,
+\end{align}
+其中 $F$ 为外力，$\tau$ 为力矩，$J$ 为转动惯量。
+写成矩阵形式，选择矩阵为
+\begin{equation}
+  \bm S = \begin{bmatrix} 1 & 0 \\ 0 & 1 \end{bmatrix} \in \mathbb R^{2\times 2} .
+\end{equation}
+由式\eqref{eq:motion}可知，当 $c_\xi>0$ 时系统渐近稳定。

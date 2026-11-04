@@ -2,11 +2,12 @@
 // 参数里的占位符：%DOC% 主文件去掉 .tex，%DOCFILE% 主文件名，%JOBNAME% 输出文件名（PDF 去掉 .pdf）
 import { spawn, execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 
 export function expandArgs(args, cfg) {
-  const docfile = cfg.mainTex;
+  const docfile = path.basename(cfg.mainTex);
   const doc = docfile.replace(/\.tex$/, '');
-  const jobname = cfg.pdf.replace(/\.pdf$/, '');
+  const jobname = path.relative(path.dirname(path.resolve(cfg.projectRoot, cfg.mainTex)), path.resolve(cfg.projectRoot, cfg.pdf)).replace(/\\/g, '/').replace(/\.pdf$/, '');
   return args.map((a) => a.replaceAll('%DOCFILE%', docfile).replaceAll('%DOC%', doc).replaceAll('%JOBNAME%', jobname));
 }
 
@@ -49,7 +50,7 @@ export class Compiler extends EventEmitter {
     this.state.step = i + 1;
     this.#line(`>>> [${i + 1}/${steps.length}] ${s.command} ${s.args.join(' ')}`);
     this.emit('state', this.state);
-    const p = spawn(s.command, s.args, { cwd: this.cfg.projectRoot, windowsHide: true });
+    const p = spawn(s.command, s.args, { cwd: path.dirname(path.resolve(this.cfg.projectRoot, this.cfg.mainTex)), windowsHide: true });
     this.proc = p;
     let buf = '';
     const onData = (chunk) => {
@@ -84,7 +85,10 @@ export class Compiler extends EventEmitter {
     this.state.tail.push(l);
     if (this.state.tail.length > 300) this.state.tail.shift();
     const m = /^(?:\.\/)?([^:\s][^:]*\.tex):(\d+): (.*)$/.exec(l);
-    if (m && this.state.errors.length < 50) this.state.errors.push({ file: m[1], line: +m[2], message: m[3] });
+    if (m && this.state.errors.length < 50) {
+      const file = path.relative(this.cfg.projectRoot, path.resolve(path.dirname(path.resolve(this.cfg.projectRoot, this.cfg.mainTex)), m[1])).replace(/\\/g, '/');
+      this.state.errors.push({ file, line: +m[2], message: m[3] });
+    }
     if (/^(>>> |Latexmk: |Run number|Output written)/.test(l)) this.emit('progress', l);
   }
 

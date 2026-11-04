@@ -1,11 +1,11 @@
 {
   "port": 4318,
-  "projectRoot": "./examples/demo",
+  "projectRoot": ".",
   "mainTex": "main.tex",
   "pdf": "main.pdf",
   "sourceDirs": ["chapters"],
   "extraSources": ["main.tex"],
-  "dataDir": "./examples/demo/.review-data",
+  "dataDir": ".review-data",
   "tools": [
     { "name": "latexmk", "command": "latexmk", "args": ["-xelatex", "-synctex=1", "-interaction=nonstopmode", "-file-line-error", "%DOCFILE%"] }
   ],
