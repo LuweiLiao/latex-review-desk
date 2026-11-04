@@ -8,6 +8,9 @@ const STRUCT = /^\\(chapter|section|subsection|subsubsection|paragraph|label|cap
 const SKIP_ENV = /^(equation|align|gather|multline|eqnarray|flalign|alignat|split|cases|figure|table|tabular|tabularx|longtable|subfigure|algorithm|algorithmic|lstlisting|verbatim|minted|tikzpicture|thebibliography|displaymath|math)\*?$/;
 
 export function splitParagraphs(text, from = 0, to = text.length, minChars = 15) {
+  // A main document also contains a preamble; only its document body is prose.
+  const body = /^[ \t]*\\begin\s*\{document\}/m.exec(text);
+  if (body) from = Math.max(from, body.index + body[0].length);
   const segs = [];
   let cur = null; // { start, end }
   const close = () => {

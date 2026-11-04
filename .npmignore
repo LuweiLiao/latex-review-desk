@@ -1,0 +1,17 @@
+config.json
+data/
+node_modules/
+test/
+examples/
+docs/
+web/src/
+web/dist/*.map
+*.tgz
+*.log
+.env*
+*.pem
+*.key
+**/config.json
+**/.env*
+**/*.pem
+**/*.key

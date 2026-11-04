@@ -1,4 +1,6 @@
 node_modules/
+.planning/
+artifacts/
 data/
 web/dist/
 web/vendor/

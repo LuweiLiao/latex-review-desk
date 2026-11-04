@@ -1,3 +1,4 @@
+import { prefs } from './storage.js';
 // 右侧批注列表：待确认的方案直接在卡片里显示修订对照，可就地接受、驳回、重做
 import { api, $, h, guard, toast, timeAgo, short, STATUS, OPEN, VERDICT } from './util.js';
 import { state, emit, on } from './state.js';
@@ -11,20 +12,20 @@ const openBoxes = new Map(); // 正在填写的回复框：id -> 文本，重绘
 
 export function initSidebar() {
   // “全部”已去掉，旧的记录按“未完成”处理
-  const sf = localStorage.getItem('statusFilter');
+  const sf = prefs.getItem('statusFilter');
   $('#statusFilter').value = sf && sf !== 'all' ? sf : 'open';
   if (!$('#statusFilter').value) $('#statusFilter').value = 'open';
-  $('#sortOrder').value = localStorage.getItem('sortOrder') || 'pos';
-  $('#statusFilter').onchange = (e) => { localStorage.setItem('statusFilter', e.target.value); renderSidebar(); };
-  $('#sortOrder').onchange = (e) => { localStorage.setItem('sortOrder', e.target.value); renderSidebar(); };
-  $('#chapterFilter').onchange = (e) => { localStorage.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
+  $('#sortOrder').value = prefs.getItem('sortOrder') || 'pos';
+  $('#statusFilter').onchange = (e) => { prefs.setItem('statusFilter', e.target.value); renderSidebar(); };
+  $('#sortOrder').onchange = (e) => { prefs.setItem('sortOrder', e.target.value); renderSidebar(); };
+  $('#chapterFilter').onchange = (e) => { prefs.setItem('chapterFilter', e.target.value); renderSidebar(); emit('chapter-filter'); };
   initResize();
   initRail();
 }
 
 function initResize() {
   const side = $('#sidebar');
-  const saved = localStorage.getItem('sideWidth');
+  const saved = prefs.getItem('sideWidth');
   if (saved) side.style.width = saved;
   $('#sideSplitter').addEventListener('mousedown', (ev) => {
     ev.preventDefault();
@@ -32,7 +33,7 @@ function initResize() {
     const move = (e) => { side.style.width = `${Math.min(innerWidth * 0.6, Math.max(280, innerWidth - e.clientX))}px`; };
     const up = () => {
       $('#sideSplitter').classList.remove('drag');
-      localStorage.setItem('sideWidth', side.style.width);
+      prefs.setItem('sideWidth', side.style.width);
       removeEventListener('mousemove', move);
       removeEventListener('mouseup', up);
     };
@@ -43,7 +44,7 @@ function initResize() {
 
 // 当前按章筛选到的文件；null 表示全部章节
 export function scopeFile() {
-  const v = localStorage.getItem('chapterFilter') || 'follow';
+  const v = prefs.getItem('chapterFilter') || 'follow';
   if (v === 'all') return null;
   if (v === 'follow') return state.openFile;
   return state.files.includes(v) ? v : state.openFile;
@@ -53,7 +54,7 @@ const chapterName = (f) => state.fileTitles[f] || f.replace(/^.*\//, '');
 
 function fillChapterFilter() {
   const sel = $('#chapterFilter');
-  const v = localStorage.getItem('chapterFilter') || 'follow';
+  const v = prefs.getItem('chapterFilter') || 'follow';
   const proposed = (f) => state.items.filter((it) => it.status === 'proposed' && (!f || it.anchor.file === f)).length;
   const open = (f) => state.items.filter((it) => OPEN.has(it.status) && it.anchor.file === f).length;
   const label = (f) => { const p = proposed(f), o = open(f); return `${chapterName(f)}${p ? `（待确认 ${p}）` : o ? `（${o}）` : ''}`; };
@@ -131,7 +132,7 @@ function card(it, inRail = false) {
   if (hasProposal0) head.append(...[!inRail && h('span', { class: 'spacer' }), h('button', {
     class: 'btn link mode-toggle',
     title: '切换左右对照 / 单栏修订',
-    onclick: () => { localStorage.setItem('sideDiffMode', diffMode() === 'inline' ? 'compare' : 'inline'); renderSidebar(); },
+    onclick: () => { prefs.setItem('sideDiffMode', diffMode() === 'inline' ? 'compare' : 'inline'); renderSidebar(); },
   }, diffMode() === 'inline' ? '对照' : '修订')].filter(Boolean));
   const hasProposal = (it.status === 'proposed' || it.status === 'accepted') && it.proposal;
   // 只显示最近一轮（上次发回重做之后）的对话，旧的“无需修改”之类不再挂着
@@ -160,7 +161,7 @@ function card(it, inRail = false) {
 }
 
 // 默认左右对照，可切到单栏修订；选择记在本地
-const diffMode = () => localStorage.getItem('sideDiffMode') || 'compare';
+const diffMode = () => prefs.getItem('sideDiffMode') || 'compare';
 const render = (hk, opts) => (diffMode() === 'inline' ? inlineDiff(hk, opts) : compareDiff(hk, opts));
 
 // 待确认方案里被撤掉的改动块：id -> { key, set }，方案更新后自动作废
@@ -270,7 +271,7 @@ function replyBox(it, text = '') {
   const ta = h('textarea', { placeholder: '哪里不满意、想怎么改（可不填，只换 skill 也行）', oninput: () => openBoxes.set(it.id, ta.value) });
   ta.value = text;
   openBoxes.set(it.id, text);
-  const sel = it.kind === 'polish' || it.status !== 'replied' ? skillSelect(it.skill || localStorage.getItem('lastSkill') || state.defaultSkill) : null;
+  const sel = it.kind === 'polish' || it.status !== 'replied' ? skillSelect(it.skill || prefs.getItem('lastSkill') || state.defaultSkill) : null;
   const close = () => { openBoxes.delete(it.id); box.remove(); };
   const box = h('div', { class: 'reply-box' },
     sel && h('label', { class: 'muted' }, '用 skill：'), sel, ta,
@@ -278,7 +279,7 @@ function replyBox(it, text = '') {
       h('button', { class: 'btn small primary', onclick: guard(async () => {
         const skill = sel?.value;
         if (!ta.value.trim() && (!skill || skill === it.skill) && it.status !== 'rejected') return toast('写一句意见，或换一个 skill');
-        if (skill) localStorage.setItem('lastSkill', skill);
+        if (skill) prefs.setItem('lastSkill', skill);
         openBoxes.delete(it.id);
         await api('POST', `/api/items/${it.id}/requeue`, { message: ta.value, skill });
         toast('已发回 agent 重做');

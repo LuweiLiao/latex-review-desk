@@ -1,11 +1,20 @@
 let beforeWrite = null;
 export function setBeforeWrite(fn) { beforeWrite = fn; }
+let projectId = new URLSearchParams(globalThis.location?.search || '').get('project') || '';
+export function setRequestProject(id) { projectId = id || ''; }
+export function projectHeaders() { return projectId ? { 'X-Project-Id': projectId } : {}; }
+export function projectUrl(url) {
+  if (!projectId) return url;
+  const parsed = new URL(url, location.origin);
+  parsed.searchParams.set('projectId', projectId);
+  return parsed.pathname + parsed.search;
+}
 
 export async function api(method, url, body) {
   if (method !== 'GET' && beforeWrite && !url.startsWith('/api/file')) await beforeWrite();
   const res = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: { ...projectHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

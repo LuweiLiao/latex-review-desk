@@ -1,3 +1,4 @@
+import { prefs } from './storage.js';
 // 左侧源码编辑器：可以直接改，停手 1 秒自动保存（Ctrl+S 立即保存）
 import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
@@ -6,7 +7,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { StreamLanguage, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { api, $, h, OPEN, setBeforeWrite, toast } from './util.js';
+import { api, $, h, OPEN, setBeforeWrite, toast, projectHeaders } from './util.js';
 import { state, emit, markedItems } from './state.js';
 
 const setMarks = StateEffect.define();
@@ -62,13 +63,13 @@ let selecting = false; // 本次鼠标按下是否从源码区开始
 let current = null; // { path, hash }
 // 每个文件的阅读位置：{ top: 视口顶部那一行的文档位置, cursor }
 const POS_KEY = 'srcPos';
-const posAll = () => { try { return JSON.parse(localStorage.getItem(POS_KEY) || '{}'); } catch { return {}; } };
+const posAll = () => { try { return JSON.parse(prefs.getItem(POS_KEY) || '{}'); } catch { return {}; } };
 function rememberPos() {
   if (!current || !view) return;
   const top = view.lineBlockAtHeight(view.scrollDOM.scrollTop).from;
   const all = posAll();
   all[current.path] = { top, cursor: view.state.selection.main.head };
-  localStorage.setItem(POS_KEY, JSON.stringify(all));
+  prefs.setItem(POS_KEY, JSON.stringify(all));
 }
 let posTimer = null;
 const rememberSoon = () => { clearTimeout(posTimer); posTimer = setTimeout(rememberPos, 300); };
@@ -79,6 +80,7 @@ const remote = Annotation.define(); // 服务端推来的内容，不算用户�
 let edits = 0, savedAt = 0, saveTimer = null, saving = null, conflict = null;
 
 const isDirty = () => edits !== savedAt;
+export function hasUnsavedSource() { return isDirty() || !!conflict; }
 
 function setStatus() {
   const el = $('#saveStatus');
@@ -103,7 +105,7 @@ export async function save(force = false) {
   const path = current.path, at = edits, text = view.state.doc.toString();
   saving = (async () => {
     try {
-      const res = await fetch('/api/file', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, text, baseHash: current.hash, force }) });
+      const res = await fetch('/api/file', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...projectHeaders() }, body: JSON.stringify({ path, text, baseHash: current.hash, force }) });
       const data = await res.json();
       if (current?.path !== path) return;
       if (res.status === 409) { showConflict(data); return; }
@@ -280,7 +282,7 @@ export async function openFile(path) {
   setStatus();
   $('#fileSelect').value = path;
   refreshMarks();
-  localStorage.setItem('lastFile', path);
+  prefs.setItem('lastFile', path);
   if (saved) {
     const len = view.state.doc.length;
     view.dispatch({ selection: { anchor: Math.min(saved.cursor ?? 0, len) } });

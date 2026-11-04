@@ -1,3 +1,4 @@
+import { prefs } from './storage.js';
 // 选中文字后的浮动菜单：批注 / 润色
 import { api, $, h, toast, short, guard } from './util.js';
 import { state, on, emit } from './state.js';
@@ -72,9 +73,9 @@ function showFormulaForm() {
   mode = 'form';
   const el = $('#selMenu');
   const scope = h('select', {}, new Option('本章', 'chapter'), new Option('全文（按章节顺序）', 'whole'));
-  scope.value = localStorage.getItem('formulaScope') || 'chapter';
+  scope.value = prefs.getItem('formulaScope') || 'chapter';
   const conc = h('select', { title: '同时交给 agent 的公式数；1 个最能按推导顺序审' }, ...[1, 2, 3].map((n) => new Option(`同时 ${n} 个`, n)));
-  conc.value = localStorage.getItem('formulaConc') || '1';
+  conc.value = prefs.getItem('formulaConc') || '1';
   const ta = h('textarea', { placeholder: '补充要求（可不填），例如：重点看矩阵维数和上下标' });
   const info = h('div', { class: 'muted' });
   const body = () => ({ type: 'formula', whole: scope.value === 'whole', anchor: pending.anchor });
@@ -89,8 +90,8 @@ function showFormulaForm() {
   upd();
   const submit = async (ev) => {
     ev?.preventDefault();
-    localStorage.setItem('formulaScope', scope.value);
-    localStorage.setItem('formulaConc', conc.value);
+    prefs.setItem('formulaScope', scope.value);
+    prefs.setItem('formulaConc', conc.value);
     try {
       const job = await api('POST', '/api/jobs', { ...body(), concurrency: +conc.value, comment: ta.value });
       hide();
@@ -138,7 +139,7 @@ function showForm(kind, skill) {
   let skillSel = null, desc = null;
   const parts = [h('div', { class: 'qprev' }, short(pending.quote, 300))];
   if (kind === 'polish') {
-    skillSel = skillSelect(skill || localStorage.getItem('lastSkill') || state.defaultSkill);
+    skillSel = skillSelect(skill || prefs.getItem('lastSkill') || state.defaultSkill);
     desc = h('div', { class: 'skill-desc' });
     const upd = () => { desc.textContent = state.skills.find((s) => s.name === skillSel.value)?.description || ''; };
     skillSel.onchange = upd;
@@ -150,9 +151,9 @@ function showForm(kind, skill) {
   let perPara = null, conc = null;
   if (kind === 'polish') {
     perPara = h('input', { type: 'checkbox' });
-    perPara.checked = pending.perParagraph ?? localStorage.getItem('perParagraph') === '1';
+    perPara.checked = pending.perParagraph ?? prefs.getItem('perParagraph') === '1';
     conc = h('select', { title: '同时交给 agent 的段数' }, ...[1, 2, 3].map((n) => new Option(`同时 ${n} 段`, n)));
-    conc.value = localStorage.getItem('perParaConc') || '1';
+    conc.value = prefs.getItem('perParaConc') || '1';
     const info = h('span', { class: 'muted' });
     const upd = async () => {
       conc.disabled = !perPara.checked;
@@ -171,21 +172,21 @@ function showForm(kind, skill) {
   const submit = async (ev) => {
     ev?.preventDefault();
     const body = { kind, comment: ta.value, anchor: pending.anchor };
-    if (skillSel) { body.skill = skillSel.value; localStorage.setItem('lastSkill', skillSel.value); }
+    if (skillSel) { body.skill = skillSel.value; prefs.setItem('lastSkill', skillSel.value); }
     try {
-      if (perPara) localStorage.setItem('perParagraph', perPara.checked ? '1' : '0');
+      if (perPara) prefs.setItem('perParagraph', perPara.checked ? '1' : '0');
       if (perPara?.checked) {
-        localStorage.setItem('perParaConc', conc.value);
+        prefs.setItem('perParaConc', conc.value);
         const job = await api('POST', '/api/jobs', { anchor: pending.anchor, skill: body.skill, comment: ta.value, concurrency: +conc.value });
         hide();
         window.getSelection()?.removeAllRanges();
-        toast(`已开始逐段润色 ${job.id}：共 ${job.total} 段，agent 会一段一段处理`);
+        toast(`已开始逐段润色 ${job.id}：共 ${job.total} 段，将按顺序处理`);
         return;
       }
       const it = await api('POST', '/api/items', body);
       hide();
       window.getSelection()?.removeAllRanges();
-      const off = state.agent.state === 'offline' ? '（agent 当前离线，上线后会处理）' : '';
+      const off = !state.ai?.configured && state.agent.state === 'offline' ? '（请先配置 API）' : '';
       toast(`已提交 ${it.id}${it.anchor.approximate ? '，位置为近似匹配' : ''}${off}`);
       emit('select-item', { id: it.id, from: 'create' });
     } catch (e) { toast(e.message, true); }

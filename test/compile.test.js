@@ -59,6 +59,20 @@ test('中间一步失败就停下，并解析出错行', async () => {
   assert.ok(!fs.existsSync(path.join(root, 'b.txt')));
 });
 
+test('嵌套主文件从所在目录编译，输出与错误路径仍对应项目文件树', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trc-nested-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'nested'));
+  const cfg = cfgFor(root, { mainTex: 'nested/main.tex', pdf: 'nested/main.pdf' });
+  assert.deepEqual(expandArgs(['%DOCFILE%', '%DOC%', '%JOBNAME%'], cfg), ['main.tex', 'main', 'main']);
+  const compiler = new Compiler(cfg);
+  compiler.start('a->b');
+  assert.equal((await done(compiler)).ok, true);
+  assert.ok(fs.existsSync(path.join(root, 'nested', 'b.txt')));
+  compiler.start('a->fail->b');
+  assert.equal((await done(compiler)).errors[0].file, 'nested/content/ch3.tex');
+});
+
 test('终止编译', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trc-'));
   const c = new Compiler(cfgFor(root));

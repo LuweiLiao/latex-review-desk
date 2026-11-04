@@ -7,7 +7,7 @@ try { gbk = new TextDecoder('gbk'); } catch { /* 没有 GBK 解码器时退回 u
 
 function run(cfg, args) {
   return new Promise((resolve, reject) => {
-    execFile('synctex', args, { cwd: cfg.projectRoot, encoding: 'buffer', timeout: 15000, windowsHide: true }, (err, stdout) => {
+    execFile('synctex', args, { cwd: path.dirname(path.resolve(cfg.projectRoot, cfg.mainTex || 'main.tex')), encoding: 'buffer', timeout: 15000, windowsHide: true }, (err, stdout) => {
       if (err && !stdout?.length) return reject(err);
       const buf = stdout || Buffer.alloc(0);
       let s = buf.toString('utf8');
@@ -39,7 +39,7 @@ function blocks(out) {
 
 // 源码行 -> PDF 上的若干个框
 export async function forward(cfg, file, line, col = 0) {
-  const out = await run(cfg, ['view', '-i', `${line}:${col}:${file}`, '-o', cfg.pdf]);
+  const out = await run(cfg, ['view', '-i', `${line}:${col}:${path.resolve(cfg.projectRoot, file)}`, '-o', path.resolve(cfg.projectRoot, cfg.pdf)]);
   const seen = new Set();
   const boxes = [];
   for (const b of blocks(out)) {
@@ -55,10 +55,10 @@ export async function forward(cfg, file, line, col = 0) {
 
 // PDF 上一点 -> 源码文件和行
 export async function backward(cfg, page, x, y) {
-  const out = await run(cfg, ['edit', '-o', `${page}:${x.toFixed(2)}:${y.toFixed(2)}:${cfg.pdf}`]);
+  const out = await run(cfg, ['edit', '-o', `${page}:${x.toFixed(2)}:${y.toFixed(2)}:${path.resolve(cfg.projectRoot, cfg.pdf)}`]);
   const b = blocks(out).find((r) => r.Input);
   if (!b) return null;
-  const abs = path.resolve(cfg.projectRoot, b.Input);
+  const abs = path.resolve(path.dirname(path.resolve(cfg.projectRoot, cfg.mainTex || 'main.tex')), b.Input);
   const rel = path.relative(cfg.projectRoot, abs).replace(/\\/g, '/');
   return { file: rel, line: Math.max(1, +b.Line), column: +b.Column };
 }

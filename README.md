@@ -2,12 +2,12 @@
 
 本地网页：左边 LaTeX 源码、中间 PDF（双向跳转，像 Overleaf），右边批注栏。
 在 PDF 或源码上划词写批注，或选一个 skill（如 humanizer-zh、shuorenhua）请求润色。
-请求经 MCP 交给后台 Claude Code / Codex agent 处理，修改方案推回网页，以“修改前 / 修改后”对照显示。
-**agent 不直接改源码**，只有你在网页上点“接受”才写入 .tex，写入后可以撤销。
+可在网页中配置 AI API 直接处理请求，也可经 MCP 交给后台 Claude Code / Codex agent。修改方案以“修改前 / 修改后”对照显示。
+**AI 提交修改方案**，只有你在网页上点“接受”才写入 .tex，写入后可以撤销。
 
-![截图](docs/screenshot.png)
+![截图](docs/npm-upgrade-screenshot.png)
 
-*A local review desk for LaTeX: read PDF and source side by side, annotate or request polishing with any agent skill, let a background agent (via MCP) propose edits, and accept them one by one after a side-by-side diff. Nothing is written to your sources until you accept.*
+*A local review desk for multiple LaTeX projects: read PDF and source side by side, annotate or request polishing through direct OpenAI, Anthropic or Gemini APIs, and accept proposed edits after a side-by-side diff. MCP agents are also supported. AI proposals are written to your sources only after you accept.*
 
 ## 功能
 
@@ -23,19 +23,65 @@
 
 ## 安装
 
-需要 Node 22.13+，以及带 `synctex` 的 TeX 发行版（TeX Live / MiKTeX）。
+需要 Node 22.13+。编译和源码/PDF 跳转需要带 `synctex` 的 TeX 发行版（TeX Live / MiKTeX）；没有安装 TeX 时也可以启动网页、管理项目和设置 AI。
+
+### npm 安装包
+
+```bash
+npm install -g latex-review-desk
+latex-review-desk /path/to/latex-project
+```
+
+启动后自动打开浏览器，默认地址为 `http://127.0.0.1:4317/`。不传项目路径时使用当前目录；主文件默认为 `main.tex`，可在网页中选择或通过参数指定。npm 包带有已经构建的前端和 PDF.js 文件，安装时不运行前端构建，也不需要安装开发依赖。
+
+```bash
+latex-review-desk "D:/papers/my thesis" --main master.tex --pdf master.pdf --port 4320
+latex-review-desk --config /path/to/config.json --no-open
+latex-review-desk --diagnose
+latex-review-desk --check-compile --engine xelatex
+```
+
+`--diagnose` 输出 TeX Live / MiKTeX 版本，以及编译器、latexmk、BibTeX、Biber、SyncTeX 的路径和版本。`--check-compile` 只编译系统临时目录中新建的最小文档，检查 PDF 和 SyncTeX 输出后删除临时文件，不编译当前项目。没有指定引擎时依次查找 pdflatex、xelatex、lualatex。检测和编译检查在同一进程中缓存 60 秒，`--refresh` 可重新检查；版本查询最多等待 8 秒，临时编译最多等待 30 秒。
+
+完整参数见 `latex-review-desk --help`：`--project`、`--config`、`--config-dir`、`--data-dir`、`--port`、`--main`、`--pdf`、`--no-open`、`--diagnose`、`--check-compile`、`--engine`、`--refresh`。
+
+### 从源码运行
 
 ```bash
 git clone https://github.com/LuweiLiao/latex-review-desk.git
 cd latex-review-desk
-npm install                          # 会顺带构建前端
-cp config.example.json config.json   # 改成你的 LaTeX 项目路径、主文件、PDF 文件名
-npm start                            # 打开 http://127.0.0.1:4317/
+npm install
+npm run build
+npm start -- /path/to/latex-project
 ```
 
-想先试试：在 `examples/demo` 里用 `latexmk -xelatex -synctex=1 main.tex` 编译一次，再 `npm run demo`，打开 http://127.0.0.1:4318/。
+想先试试：在 `examples/demo` 里用 `latexmk -xelatex -synctex=1 main.tex` 编译一次，再 `npm run demo`，打开 http://127.0.0.1:4318/。自己的配置可从 `config.example.json` 复制；用 `--config` 明确指定配置文件。
 
-### 接上 agent
+发布前运行 `npm pack` 会构建压缩前端。包中只包含运行所需的服务端、CLI、前端、PDF.js、agent skills、配置示例和许可证；实际 `config.json`、审阅数据、开发文档、测试和密钥文件不在发布范围内。
+
+### 用户目录
+
+配置、项目登记和 AI 设置保存在全局用户配置目录。命令行首次打开项目时，默认审阅数据位置如下：
+
+| 系统 | 默认配置目录 | 默认数据目录 |
+|---|---|---|
+| Windows | `%APPDATA%/latex-review-desk` | `%LOCALAPPDATA%/latex-review-desk/projects/<项目路径摘要>` |
+| macOS | `~/Library/Application Support/latex-review-desk` | `~/Library/Application Support/latex-review-desk/projects/<项目路径摘要>` |
+| Linux | `$XDG_CONFIG_HOME/latex-review-desk`，默认 `~/.config/latex-review-desk` | `$XDG_DATA_HOME/latex-review-desk/projects/<项目路径摘要>`，默认 `~/.local/share/latex-review-desk/projects/<项目路径摘要>` |
+
+`--config-dir` 和 `--data-dir` 可覆盖这些目录。对应环境变量为 `THESIS_REVIEW_CONFIG_DIR`、`THESIS_REVIEW_DATA_DIR`；项目和启动选项还可用 `THESIS_REVIEW_CONFIG`、`THESIS_REVIEW_PROJECT`、`THESIS_REVIEW_PORT`、`THESIS_REVIEW_MAIN_TEX`、`THESIS_REVIEW_PDF` 设置。显式命令行参数优先。通过 `--config` 加载旧配置时沿用其数据位置，不把已有审阅记录移到新目录。
+
+网页中添加的项目，其配置和审阅数据保存在 `<配置目录>/projects/<项目 ID>/config.json` 和 `<配置目录>/projects/<项目 ID>/data/`；目录导入的副本保存在同一项目目录的 `source/` 中。项目登记表为 `<配置目录>/projects/projects.json`，AI 设置为 `<配置目录>/ai-settings.json`。再次打开已登记的项目时沿用该项目原来的数据位置。
+
+本次实际运行验证使用 Windows、Node 22.19.0 和 TeX Live 2025；macOS/Linux 目录和浏览器命令有单元测试，尚未在对应系统实机验证。
+
+### 配置 AI
+
+网页的 AI 设置中选择接口格式，填写 API 地址、模型和密钥后测试连接。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic 和 Gemini 格式；配置后可直接处理批注和润色请求。项目的写作要求可保存在项目设置中。密钥保存在用户配置目录，不随 npm 包分发。
+
+### 接上 MCP agent
+
+需要使用 Claude Code / Codex agent 时，可按下面的步骤连接 MCP：
 
 1. 注册 MCP（服务名用 `thesis-review`，skill 里按这个名字调用工具）：
 
@@ -93,7 +139,7 @@ npm start                            # 打开 http://127.0.0.1:4317/
 
 ## 配置
 
-`config.json`（相对路径按本工具目录解析）：
+`--config` 指定的配置文件中，相对项目路径按配置文件所在目录解析；命令行项目路径按启动时的当前目录解析：
 
 | 字段 | 说明 |
 |---|---|
@@ -116,7 +162,7 @@ npm start                            # 打开 http://127.0.0.1:4317/
 ## 说明
 
 - 只监听 127.0.0.1，并校验 Host / Origin。
-- 批注和方案保存在 `data/state.json`，已在 `.gitignore` 里。
+- 批注和方案保存在所选数据目录的 `state.json`；旧配置继续使用原数据目录。
 - 测试：`npm test`；MCP 冒烟测试：`npm run smoke`（会领取一条真实请求并提交一个测试方案）。
 
 ## License

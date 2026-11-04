@@ -1,7 +1,8 @@
+import { prefs } from './storage.js';
 // 右侧 PDF 视图（pdf.js），批注高亮、选区、和源码双向跳转
 import './pdfjs-global.js';
 import { EventBus, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
-import { api, $, OPEN, toast } from './util.js';
+import { api, $, OPEN, toast, projectUrl } from './util.js';
 import { KEEP, findSpan, foldChar, projectSource } from '../lib/text.js';
 import { formulaBoxes } from '../lib/mathbox.js';
 import { changeSpans } from '../lib/diff.js';
@@ -13,9 +14,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
 let viewer, eventBus, linkService, doc = null, loadingTask = null;
 let restored = false, posReady = false; // 刷新后是否已恢复上次位置
 const boxCache = new Map(); // key -> [{page, fx, fy, fw, fh}]
-let showFormulas = localStorage.getItem('formulaBoxes') !== '0'; // 公式框常显；关掉后只在鼠标移上去时显示
+let showFormulas = true; // 公式框常显；关掉后只在鼠标移上去时显示
 
 export function initPdf() {
+  showFormulas = prefs.getItem('formulaBoxes') !== '0';
   const container = $('#pdfContainer');
   eventBus = new EventBus();
   linkService = new PDFLinkService({ eventBus });
@@ -23,12 +25,12 @@ export function initPdf() {
   linkService.setViewer(viewer);
 
   eventBus.on('pagesinit', () => {
-    viewer.currentScaleValue = localStorage.getItem('pdfScale') || 'page-width';
+    viewer.currentScaleValue = prefs.getItem('pdfScale') || 'page-width';
     if (!restored) {
       restored = true;
       // 刷新网页：回到上次看到的页和页内位置
       try {
-        const p = JSON.parse(localStorage.getItem('pdfPos') || 'null');
+        const p = JSON.parse(prefs.getItem('pdfPos') || 'null');
         if (p?.page && p.page <= doc.numPages) requestAnimationFrame(() => scrollToPage(p.page, p.frac || 0));
       } catch { /* 记录坏了就从头看 */ }
     }
@@ -44,7 +46,7 @@ export function initPdf() {
       const pv = pageView(viewer.currentPageNumber);
       if (!pv?.div) return;
       const frac = (container.scrollTop - pv.div.offsetTop) / Math.max(1, pv.div.clientHeight);
-      localStorage.setItem('pdfPos', JSON.stringify({ page: viewer.currentPageNumber, frac: Math.max(0, Math.min(1, frac)) }));
+      prefs.setItem('pdfPos', JSON.stringify({ page: viewer.currentPageNumber, frac: Math.max(0, Math.min(1, frac)) }));
     }, 300);
   }, { passive: true });
   eventBus.on('scalechanging', ({ scale }) => {
@@ -56,7 +58,7 @@ export function initPdf() {
   eventBus.on('pagerendered', ({ pageNumber }) => { drawPage(pageNumber); drawFormulas(pageNumber); });
   eventBus.on('textlayerrendered', ({ pageNumber }) => drawPage(pageNumber));
 
-  const setScale = (v) => { viewer.currentScaleValue = v; localStorage.setItem('pdfScale', String(v)); };
+  const setScale = (v) => { viewer.currentScaleValue = v; prefs.setItem('pdfScale', String(v)); };
   $('#zoomIn').onclick = () => setScale(Math.min(4, viewer.currentScale * 1.15));
   $('#zoomOut').onclick = () => setScale(Math.max(0.3, viewer.currentScale / 1.15));
   $('#zoomFit').onclick = () => setScale('page-width');
@@ -84,11 +86,11 @@ export function initPdf() {
       container.scrollLeft += r1.left + fx * r1.width - ev.clientX;
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => localStorage.setItem('pdfScale', String(viewer.currentScale)), 300);
+    saveTimer = setTimeout(() => prefs.setItem('pdfScale', String(viewer.currentScale)), 300);
   }, { passive: false });
   $('#pageInput').onchange = (e) => { viewer.currentPageNumber = Math.max(1, Math.min(doc?.numPages || 1, +e.target.value)); };
-  $('#showMarks').checked = localStorage.getItem('showAllMarks') === '1';
-  $('#showMarks').onchange = (e) => { localStorage.setItem('showAllMarks', e.target.checked ? '1' : '0'); emit('marks-changed'); };
+  $('#showMarks').checked = prefs.getItem('showAllMarks') === '1';
+  $('#showMarks').onchange = (e) => { prefs.setItem('showAllMarks', e.target.checked ? '1' : '0'); emit('marks-changed'); };
 
   $('#showFormulas').checked = showFormulas;
   $('#showFormulas').onchange = (e) => setFormulaBoxes(e.target.checked);
@@ -141,9 +143,14 @@ export function initPdf() {
 }
 
 export async function loadPdf() {
-  if (!state.pdf) return;
+  if (!state.pdf) {
+    $('#pdfViewer').replaceChildren();
+    $('#pageCount').textContent = '0';
+    $('#zoomLabel').textContent = '暂无 PDF';
+    return;
+  }
   const keep = doc ? { page: viewer.currentPageNumber, scale: viewer.currentScaleValue, top: $('#pdfContainer').scrollTop } : null;
-  const url = `/pdf?v=${Math.round(state.pdf.mtime)}`;
+  const url = projectUrl(`/pdf?v=${Math.round(state.pdf.mtime)}`);
   const oldTask = loadingTask;
   const task = pdfjsLib.getDocument({
     url,
@@ -509,7 +516,7 @@ async function drawFormulas(n) {
 
 export function setFormulaBoxes(on) {
   showFormulas = !!on;
-  localStorage.setItem('formulaBoxes', on ? '1' : '0');
+  prefs.setItem('formulaBoxes', on ? '1' : '0');
   document.querySelectorAll('.fx-layer').forEach((l) => l.classList.toggle('hover-only', !showFormulas));
 }
 

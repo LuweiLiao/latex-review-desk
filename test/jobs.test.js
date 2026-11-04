@@ -63,6 +63,13 @@ function setup() {
 
 const settle = (jobs) => jobs.tick();
 
+test('整篇主文件逐段润色跳过导言区，仍保留章节文件正文', () => {
+  const document = '\\documentclass{article}\n\\usepackage{amsmath}\n\\newcommand{\\control}{a multiline definition}\n\\begin{document}\n\\section{Tracking}\nThe controller improves tracking performance.\n\\end{document}\n';
+  assert.deepEqual(splitParagraphs(document).map((s) => document.slice(s.start, s.end)), ['The controller improves tracking performance.']);
+  const chapter = '\\section{Results}\nThe tracking error converges to zero.\n';
+  assert.deepEqual(splitParagraphs(chapter).map((s) => chapter.slice(s.start, s.end)), ['The tracking error converges to zero.']);
+});
+
 test('逐段任务：一次只放一段，交了方案再放下一段，全部交完算完成', async () => {
   const { review, jobs } = setup();
   const j = await jobs.create({ anchor: { source: 'source', file: 'content/a.tex', whole: true }, skill: 'humanizer-zh', concurrency: 1 });

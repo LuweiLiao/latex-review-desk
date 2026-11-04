@@ -1,17 +1,32 @@
 {
   "name": "latex-review-desk",
-  "version": "0.2.0",
-  "private": true,
-  "description": "本地 LaTeX 审阅台：PDF/源码对照阅读、批注、按 skill 润色，经 MCP 交给后台 agent 处理，修改方案在网页对照确认后才写入",
+  "version": "0.3.0",
+  "description": "Multi-project local LaTeX review with direct OpenAI, Anthropic and Gemini APIs, PDF/source comparison, annotations and confirmed edits.",
   "type": "module",
+  "bin": {
+    "latex-review-desk": "bin/latex-review-desk.js"
+  },
+  "files": [
+    "bin/",
+    "server/",
+    "web/index.html",
+    "web/style.css",
+    "web/lib/",
+    "web/dist/app.js",
+    "web/vendor/",
+    "skills/",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node scripts/build.js",
-    "postinstall": "node scripts/build.js",
-    "start": "node scripts/build.js && node server/index.js",
+    "prepack": "node scripts/build.js --minify",
+    "start": "node bin/latex-review-desk.js",
     "serve": "node server/index.js",
     "test": "node --test test/*.test.js",
     "smoke": "node scripts/mcp-smoke.js",
-    "demo": "node scripts/build.js && node -e \"process.env.THESIS_REVIEW_CONFIG='examples/demo/config.json';import('./server/index.js')\""
+    "demo": "node bin/latex-review-desk.js --config examples/demo/config.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

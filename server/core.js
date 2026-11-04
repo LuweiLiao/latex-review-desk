@@ -214,6 +214,24 @@ export class Review extends EventEmitter {
     return picked.map((it) => this.payload(it));
   }
 
+  claimIds(ids) {
+    const wanted = new Set(ids);
+    const picked = this.items.filter((it) => it.status === 'pending' && wanted.has(it.id));
+    for (const it of picked) { it.status = 'claimed'; it.claimedAt = Date.now(); it.updatedAt = Date.now(); }
+    if (picked.length) this.#changed();
+    return picked.map((it) => this.payload(it));
+  }
+
+  release(id) {
+    const it = this.find(id);
+    if (it.status !== 'claimed') return false;
+    it.status = 'pending';
+    delete it.claimedAt;
+    it.updatedAt = Date.now();
+    this.#changed(true);
+    return true;
+  }
+
   payload(it) {
     const { text } = this.files.read(it.anchor.file);
     const loc = relocate(text, it.anchor.quote, it.anchor.lineStart);
