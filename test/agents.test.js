@@ -35,4 +35,6 @@ test('a legacy single API configuration becomes the default agent without losing
   assert.equal(settings.public().agents.length, 1);
   assert.equal(settings.getFor('comment').apiKey, 'old-key');
   assert.equal(settings.get().apiFormat, 'generateContent');
+  fs.writeFileSync(path.join(dir, 'ai-settings.json'), JSON.stringify({ apiKey: '', model: 'saved' }));
+  assert.equal(new AiSettings(dir, { apiKey: 'config-default-key' }).get().apiKey, '');
 });

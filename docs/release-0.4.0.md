@@ -1,5 +1,10 @@
 # 0.4.0
 
+```powershell
+npm install -g "https://github.com/LuweiLiao/latex-review-desk/releases/download/v0.4.0/latex-review-desk-0.4.0.tgz"
+latex-review-desk "D:/papers/example" --port 4320
+```
+
 - “打开文件夹”直接请求操作系统原生文件夹选择器；选择后打开原目录。Windows 使用 IFileOpenDialog，macOS 使用 choose folder，Linux 使用 zenity。取消选择时不登记项目。
 - Agent 设置支持新增、编辑、删除多组配置；各组独立保存接口格式、地址、模型、密钥、提示词和并发数量。
 - 顶部可切换默认 Agent，正文润色、批注回复和公式审核可分别指定 Agent。请求结果记录实际使用的 Agent 名称和模型。

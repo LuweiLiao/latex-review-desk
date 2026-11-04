@@ -30,7 +30,7 @@
 使用 npm 直接安装 GitHub Release 中已经构建的软件包。无需克隆源码、构建前端或登录 npm 账户。
 
 ```bash
-npm install -g "https://github.com/LuweiLiao/latex-review-desk/releases/download/v0.3.0/latex-review-desk-0.3.0.tgz"
+npm install -g "https://github.com/LuweiLiao/latex-review-desk/releases/download/v0.4.0/latex-review-desk-0.4.0.tgz"
 latex-review-desk /path/to/latex-project
 ```
 
@@ -42,10 +42,10 @@ Windows 示例：
 latex-review-desk "D:/papers/my thesis" --port 4320
 ```
 
-也可从 Release 下载 `latex-review-desk-0.3.0.tgz`，在下载目录中安装：
+也可从 Release 下载 `latex-review-desk-0.4.0.tgz`，在下载目录中安装：
 
 ```powershell
-npm install -g ./latex-review-desk-0.3.0.tgz
+npm install -g ./latex-review-desk-0.4.0.tgz
 ```
 
 更新时安装新版本 Release 对应的地址；卸载使用 `npm uninstall -g latex-review-desk`。
@@ -64,7 +64,7 @@ latex-review-desk --check-compile --engine xelatex
 ### 从源码运行
 
 ```bash
-git clone --branch v0.3.0 https://github.com/LuweiLiao/latex-review-desk.git
+git clone --branch v0.4.0 https://github.com/LuweiLiao/latex-review-desk.git
 cd latex-review-desk
 npm ci
 npm run build
